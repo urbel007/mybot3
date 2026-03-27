@@ -65,8 +65,6 @@ DAILY_DETAIL_COLUMNS = [
     # Phase 1
     "sl_p1",       # Phase 1 stop loss max in USD.
     "tp_p1",       # Phase 1 take profit in pct.
-    "act_p1",      # Phase 1 trailing activation in USD.
-    "tr_dist_p1",  # Phase 1 trailing distance in USD.
 
     # Live runtime snapshot
     "mark_pts",    # Current structure mark in points.
@@ -76,9 +74,6 @@ DAILY_DETAIL_COLUMNS = [
     "sl_base",     # Current base stop loss max in USD.
     "sl_eff",      # Current effective stop loss in USD.
     "tp_live",     # Current live take profit in USD.
-    "tr_dist",     # Current live trailing distance in USD.
-    "tr_on",       # Current live trailing active flag.
-
     # Leg snapshot
     "sc_k",        # Short call strike.
     "sc_m",        # Short call mid.
@@ -133,14 +128,9 @@ DAILY_SUMMARY_COLUMNS = [
     "sl_base",     # Last base stop loss max in USD.
     "sl_eff",      # Last effective stop loss in USD.
     "tp_live",     # Last live take profit in USD.
-    "tr_dist",     # Last live trailing distance in USD.
-    "tr_on",       # Last live trailing active flag.
-
     # Phase 1
     "sl_p1",       # Phase 1 stop loss max in USD.
     "tp_p1",       # Phase 1 take profit in pct.
-    "act_p1",      # Phase 1 trailing activation in USD.
-    "tr_dist_p1",  # Phase 1 trailing distance in USD.
 ]
 
 
@@ -179,9 +169,6 @@ RUN_SUMMARY_COLUMNS = [
     "num_sl1_exit",      # Count of sl1 day exits.
     "num_sl2_exit",      # Count of sl2 day exits.
     "num_sl3_exit",      # Count of sl3 day exits.
-    "num_ts1_exit",      # Count of ts1 day exits.
-    "num_ts2_exit",      # Count of ts2 day exits.
-    "num_ts3_exit",      # Count of ts3 day exits.
     "num_tp1_exit",      # Count of tp1 day exits.
     "num_tp2_exit",      # Count of tp2 day exits.
     "num_tp3_exit",      # Count of tp3 day exits.
@@ -189,7 +176,6 @@ RUN_SUMMARY_COLUMNS = [
 
     # Exit rates
     "pct_exit_sl",       # Fraction of stop-loss exits among all exits.
-    "pct_exit_ts",       # Fraction of trailing-stop exits among all exits.
     "pct_exit_tp",       # Fraction of take-profit exits among all exits.
     "pct_exit_time",     # Fraction of time exits among all exits.
 
@@ -272,18 +258,6 @@ def _fmt_threshold_tick(value: Any) -> str:
         return "----"
 
 
-def _fmt_trailing_tick(value: Any, *, active: bool) -> str:
-    if value is None:
-        distance = "---"
-    else:
-        try:
-            distance = f"{int(round(float(value))):>3d}"
-        except Exception:
-            distance = "---"
-    state = "on " if active else "off"
-    return f"{state}{distance}"
-
-
 def _format_leg_slot(prefix: str, strike: Any, mid: Any) -> str:
     strike_text = "----"
     if strike is not None:
@@ -307,7 +281,7 @@ def build_live_tick_line_from_detail(row: dict[str, Any]) -> str:
             f"[T] {_tick_time_hms(row.get('ts'))} | "
             f"SPX {_format_tick_number(row.get('und_px'), 2):>7} | "
             f"C---- m----- | P---- m----- | C---- m----- | P---- m----- | "
-            f"M ------- | BE ----|---- | PH - | SLb ----- | SLe ----- | TP ----- | TR ---- | "
+            f"M ------- | BE ----|---- | PH - | SLb ----- | SLe ----- | TP ----- | "
             f"U ------- | R ------- | N ------- | B -------"
         )
 
@@ -327,7 +301,6 @@ def build_live_tick_line_from_detail(row: dict[str, Any]) -> str:
         f"SLb {_fmt_threshold_tick(row.get('sl_base'))} | "
         f"SLe {_fmt_threshold_tick(row.get('sl_eff'))} | "
         f"TP {_fmt_threshold_tick(row.get('tp_live'))} | "
-        f"TR {_fmt_trailing_tick(row.get('tr_dist'), active=bool(row.get('tr_on')))} | "
         f"U {_fmt_signed_tick(row.get('u_pnl'), 7, 2)} | "
         f"R {_fmt_signed_tick(row.get('r_pnl'), 7, 2)} | "
         f"N {_fmt_signed_tick(row.get('cum_n'), 7, 2)} | "
@@ -432,9 +405,6 @@ class DailyDetailRow:
     # Phase 1
     sl_p1: float | None = None
     tp_p1: float | None = None
-    act_p1: float | None = None
-    tr_dist_p1: float | None = None
-
     # Live runtime snapshot
     mark_pts: float | None = None
     be_lo: float | None = None
@@ -443,9 +413,6 @@ class DailyDetailRow:
     sl_base: float | None = None
     sl_eff: float | None = None
     tp_live: float | None = None
-    tr_dist: float | None = None
-    tr_on: bool | None = None
-
     # Leg snapshot
     sc_k: float | None = None
     sc_m: float | None = None
@@ -1411,14 +1378,9 @@ class TradingRunOutput:
             "sl_base": last_non_null("sl_base"),
             "sl_eff": last_non_null("sl_eff"),
             "tp_live": last_non_null("tp_live"),
-            "tr_dist": last_non_null("tr_dist"),
-            "tr_on": last_non_null("tr_on"),
-
             # Phase 1
             "sl_p1": last_non_null("sl_p1"),
             "tp_p1": last_non_null("tp_p1"),
-            "act_p1": last_non_null("act_p1"),
-            "tr_dist_p1": last_non_null("tr_dist_p1"),
         }
         return summary
 
@@ -1530,18 +1492,14 @@ class TradingRunOutput:
         num_sl1_exit = int((exit_reasons == "sl1").sum())
         num_sl2_exit = int((exit_reasons == "sl2").sum())
         num_sl3_exit = int((exit_reasons == "sl3").sum())
-        num_ts1_exit = int((exit_reasons == "ts1").sum())
-        num_ts2_exit = int((exit_reasons == "ts2").sum())
-        num_ts3_exit = int((exit_reasons == "ts3").sum())
         num_tp1_exit = int((exit_reasons == "tp1").sum())
         num_tp2_exit = int((exit_reasons == "tp2").sum())
         num_tp3_exit = int((exit_reasons == "tp3").sum())
         num_time_exit = int((exit_reasons == "time").sum())
 
         num_sl_exit = num_sl1_exit + num_sl2_exit + num_sl3_exit
-        num_ts_exit = num_ts1_exit + num_ts2_exit + num_ts3_exit
         num_tp_exit = num_tp1_exit + num_tp2_exit + num_tp3_exit
-        total_exits = num_sl_exit + num_ts_exit + num_tp_exit + num_time_exit
+        total_exits = num_sl_exit + num_tp_exit + num_time_exit
 
         gross_wins = float(wins.sum()) if not wins.empty else 0.0
         gross_losses = float((-losses).sum()) if not losses.empty else 0.0
@@ -1572,15 +1530,11 @@ class TradingRunOutput:
             "num_sl1_exit": num_sl1_exit,
             "num_sl2_exit": num_sl2_exit,
             "num_sl3_exit": num_sl3_exit,
-            "num_ts1_exit": num_ts1_exit,
-            "num_ts2_exit": num_ts2_exit,
-            "num_ts3_exit": num_ts3_exit,
             "num_tp1_exit": num_tp1_exit,
             "num_tp2_exit": num_tp2_exit,
             "num_tp3_exit": num_tp3_exit,
             "num_time_exit": num_time_exit,
             "pct_exit_sl": self._safe_ratio(num_sl_exit, total_exits),
-            "pct_exit_ts": self._safe_ratio(num_ts_exit, total_exits),
             "pct_exit_tp": self._safe_ratio(num_tp_exit, total_exits),
             "pct_exit_time": self._safe_ratio(num_time_exit, total_exits),
             "avg_intraday_drawdown": self._series_mean(intraday_drawdown.dropna()),

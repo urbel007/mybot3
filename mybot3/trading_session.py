@@ -100,8 +100,6 @@ class TradingSession:
         self.min_entry_credit = float(min_entry_credit)
         self.quantity = int(quantity)
         self.contract_multiplier = int(contract_multiplier)
-        self.activation_profit: float | None = None
-        self.trail_distance: float | None = None
         self.timed_walkthrough_policy = timed_walkthrough_policy
         self.exchange_timezone = ZoneInfo("America/New_York")
 
@@ -120,8 +118,6 @@ class TradingSession:
         self.active_trade_id: str | None = None
         self._tick_transition_event: str | None = None
         self._tick_transition_reason: str | None = None
-        self.trailing_active = False
-        self.trailing_peak_pnl_usd: float | None = None
         self.break_even_center_strike: float | None = None
         self.break_even_entry_credit: float | None = None
         self.entry_fill_confirmed_at: datetime | None = None
@@ -337,7 +333,6 @@ class TradingSession:
         quality_counts = self._market_quality_counts(market_snapshot)
         metadata = getattr(market_snapshot, "metadata", {}) or {}
         phase_settings = self._phase_settings_snapshot()
-        self._update_trailing_phase_snapshots(total_pnl=total_pnl)
         be_lo, be_hi = self._current_break_even_bounds()
         leg_metrics = self._tick_leg_metrics()
         self.output.record_daily_detail(
@@ -369,8 +364,7 @@ class TradingSession:
                 q_miss=quality_counts["missing"],
                 sl_p1=phase_settings["sl_p1"],
                 tp_p1=phase_settings["tp_p1"],
-                act_p1=phase_settings["act_p1"],
-                tr_dist_p1=phase_settings["tr_dist_p1"],
+
                 note=self._tick_note(broker_snapshot),
                 mark_pts=self._current_mark_price(),
                 be_lo=be_lo,
@@ -379,8 +373,7 @@ class TradingSession:
                 sl_base=self.stop_loss_max if in_window else None,
                 sl_eff=self._effective_stop_loss_usd(),
                 tp_live=self._effective_take_profit_usd(),
-                tr_dist=self.trail_distance if in_window else None,
-                tr_on=self.trailing_active,
+
                 sc_k=leg_metrics["sc_k"],
                 sc_m=leg_metrics["sc_m"],
                 sp_k=leg_metrics["sp_k"],
@@ -419,11 +412,7 @@ class TradingSession:
             base_sl = max(sl_from_pct, float(self.stop_loss_max))
         else:
             base_sl = float(self.stop_loss_max)
-        if not self.trailing_active or self.trailing_peak_pnl_usd is None:
-            return base_sl
-        if self.trail_distance is None:
-            return base_sl
-        return float(max(base_sl, float(self.trailing_peak_pnl_usd) - float(self.trail_distance)))
+        return base_sl
 
     def _tick_leg_metrics(self) -> dict[str, float | None]:
         return {
@@ -464,19 +453,7 @@ class TradingSession:
         return {
             "sl_p1": self.stop_loss_max,
             "tp_p1": self.take_profit_pct,
-            "act_p1": self.activation_profit,
-            "tr_dist_p1": self.trail_distance,
         }
-
-    def _update_trailing_phase_snapshots(self, *, total_pnl: float | None) -> None:
-        if total_pnl is None:
-            return
-        if self.activation_profit is None or self.trail_distance is None:
-            return
-        if total_pnl >= self.activation_profit:
-            self.trailing_active = True
-            if self.trailing_peak_pnl_usd is None or total_pnl > self.trailing_peak_pnl_usd:
-                self.trailing_peak_pnl_usd = float(total_pnl)
 
     def _market_quality_counts(self, market_snapshot) -> dict[str, int]:
         counts = {
@@ -1036,15 +1013,6 @@ class TradingSession:
             )
             return []
 
-        if self.activation_profit is not None and executable_pnl >= self.activation_profit:
-            self._submit_break_even_reduction(
-                market_snapshot=market_snapshot,
-                now=now,
-                executable_pnl=executable_pnl,
-                mark_pnl=mark_pnl,
-                reason="whole iron fly break-even trigger reached",
-            )
-
         return []
 
     def handle_be_exit_pending(self, market_snapshot, now):
@@ -1325,8 +1293,6 @@ class TradingSession:
         self.pending_context = {}
         self.iron_fly_position = None
         self.credit_spread_position = None
-        self.trailing_active = False
-        self.trailing_peak_pnl_usd = None
         self.break_even_center_strike = None
         self.break_even_entry_credit = None
         self.entry_fill_confirmed_at = None
