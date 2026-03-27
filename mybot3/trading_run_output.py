@@ -69,6 +69,8 @@ DAILY_DETAIL_COLUMNS = [
     "sl_base",     # Current base stop loss max in USD.
     "sl_eff",      # Current effective stop loss in USD.
     "tp_live",     # Current live take profit in USD.
+    "sl_eff_pct",  # Stop-loss percentage shown in live tick output.
+    "tp_live_pct", # Take-profit percentage shown in live tick output.
     # Leg snapshot
     "sc_k",        # Short call strike.
     "sc_m",        # Short call mid.
@@ -248,6 +250,15 @@ def _fmt_threshold_tick(value: Any) -> str:
         return "----"
 
 
+def _fmt_percent_tick(value: Any) -> str:
+    if value is None:
+        return "----"
+    try:
+        return f"{int(round(float(value))):>3d}%"
+    except Exception:
+        return "----"
+
+
 def _format_leg_slot(prefix: str, strike: Any, mid: Any) -> str:
     strike_text = "----"
     if strike is not None:
@@ -271,7 +282,7 @@ def build_live_tick_line_from_detail(row: dict[str, Any]) -> str:
             f"[T] {_tick_time_hms(row.get('ts'))} | "
             f"SPX {_format_tick_number(row.get('und_px'), 2):>7} | "
             f"C---- m----- | P---- m----- | C---- m----- | P---- m----- | "
-            f"M ------- | BE ----|---- | PH - | SLb ----- | SLe ----- | TP ----- | "
+            f"M ------- | BE ----|---- | SLb ----- | SLe ----- | TP ----- | "
             f"U ------- | R ------- | N ------- | B -------"
         )
 
@@ -281,16 +292,18 @@ def build_live_tick_line_from_detail(row: dict[str, Any]) -> str:
         _format_leg_slot("C", row.get("lc_k"), row.get("lc_m")),
         _format_leg_slot("P", row.get("lp_k"), row.get("lp_m")),
     ]
+    trade_started = row.get("entry_px") is not None
+    sle_text = _fmt_threshold_tick(row.get("sl_eff")) if trade_started else _fmt_percent_tick(row.get("sl_eff_pct", row.get("sl_eff")))
+    tp_text = _fmt_threshold_tick(row.get("tp_live")) if trade_started else _fmt_percent_tick(row.get("tp_live_pct", row.get("tp_live")))
     return (
         f"[T] {_tick_time_hms(row.get('ts'))} | "
         f"SPX {_format_tick_number(row.get('und_px'), 2):>7} | "
         f"{legs[0]:<12} | {legs[1]:<12} | {legs[2]:<12} | {legs[3]:<12} | "
         f"M {_fmt_mark_tick(row.get('mark_pts'))} | "
         f"BE {_fmt_break_even_tick(row.get('be_lo'), row.get('be_hi'))} | "
-        f"PH {_fmt_phase_tick(row.get('ph_n'))} | "
         f"SLb {_fmt_threshold_tick(row.get('sl_base'))} | "
-        f"SLe {_fmt_threshold_tick(row.get('sl_eff'))} | "
-        f"TP {_fmt_threshold_tick(row.get('tp_live'))} | "
+        f"SLe {sle_text} | "
+        f"TP {tp_text} | "
         f"U {_fmt_signed_tick(row.get('u_pnl'), 7, 2)} | "
         f"R {_fmt_signed_tick(row.get('r_pnl'), 7, 2)} | "
         f"N {_fmt_signed_tick(row.get('cum_n'), 7, 2)} | "
@@ -400,6 +413,8 @@ class DailyDetailRow:
     sl_base: float | None = None
     sl_eff: float | None = None
     tp_live: float | None = None
+    sl_eff_pct: float | None = None
+    tp_live_pct: float | None = None
     # Leg snapshot
     sc_k: float | None = None
     sc_m: float | None = None

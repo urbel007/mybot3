@@ -1,5 +1,5 @@
 """
-Minimal broker protocol for mybot3 pseudocode.
+Minimal broker protocol for mybot3.
 
 Purpose:
 - Define the smallest broker-facing interface needed by MyBot3StateMachine.
@@ -20,7 +20,7 @@ class IronFlySpec:
     """
     Minimal description of the intended Iron Fly structure.
 
-    Pseudocode payload only.
+    Broker protocol definition.
     A later implementation could replace Any with precise contract models.
     """
 

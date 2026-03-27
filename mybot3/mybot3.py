@@ -1,4 +1,4 @@
-"""Entrypoint for the mybot3 pseudocode trading session."""
+"""Entrypoint for the mybot3 trading session."""
 
 import argparse
 import inspect
@@ -160,7 +160,7 @@ def _build_run_parser() -> argparse.ArgumentParser:
     # - python -m mybot3.mybot3 --paper --test-scenario timed-walkthrough --be-after-seconds 60 --exit-after-seconds 120
     # - python -m mybot3.mybot3 --paper --write-market --to-excel-csv
     # - python -m mybot3.mybot3 --paper --entry-gate-start-time-local 12:30 --entry-gate-min-credit-usd 1050 --entry-gate-time-tolerance-seconds 300
-    parser = argparse.ArgumentParser(description="Run the mybot3 pseudocode state machine entrypoint.")
+    parser = argparse.ArgumentParser(description="Run the mybot3 state machine entrypoint.")
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument("--live", action="store_true", help="Run mybot3 in live mode with the IBKR live port.")
     mode_group.add_argument("--paper", action="store_true", help="Run mybot3 in paper mode with the IBKR paper port.")
@@ -431,7 +431,7 @@ def main() -> int:
         }
     )
 
-    output.log("info", "mybot3 pseudocode entrypoint", run_id=output.run_id, mode=mode, output_dir=str(output.run_dir))
+    output.log("info", "mybot3 entrypoint", run_id=output.run_id, mode=mode, output_dir=str(output.run_dir))
     output.log("info", "session window configured", session_start=SESSION_START_TIME_LOCAL, session_end=SESSION_END_TIME_LOCAL)
     output.log(
         "info",
@@ -441,6 +441,8 @@ def main() -> int:
         entry_gate_min_credit_usd=args.entry_gate_min_credit_usd if not args.no_entry_gate else "N/A",
         entry_gate_time_tolerance_seconds=args.entry_gate_time_tolerance_seconds if not args.no_entry_gate else "N/A",
     )
+    if not args.no_entry_gate:
+        output.log("info", "entry blocked by gate policy", note="no trade will be started until gate conditions are met")
     output.log("info", "valid day policy configured", **VALID_DAY_POLICY)
     if timed_walkthrough_policy is not None:
         output.log(
@@ -505,6 +507,12 @@ def main() -> int:
         output.log("info", "session initialized", initial_state=trading_session.state, trade_date=trade_date.isoformat())
         if args.print_config:
             output.log("info", "risk config", take_profit_pct=TAKE_PROFIT_PCT, stop_loss_pct=STOP_LOSS_PCT, stop_loss_max=STOP_LOSS_MAX)
+
+        # Early exit: without --write-market this run should not keep waiting for live update streaming.
+        if not args.write_market:
+            output.log("info", "session skipped", reason="--write-market not set; no live market data streaming configured")
+            output.log("info", "runtime note", note="broker session updates were not requested", trade_date=trade_date.isoformat())
+            continue
 
         for update in broker.iter_session_updates(trade_date=trade_date):
             output.write_market_data(update)

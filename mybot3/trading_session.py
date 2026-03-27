@@ -1,5 +1,5 @@
 """
-Trading session state machine for the mybot3 pseudocode model.
+Trading session state machine for the mybot3 model.
 
 Purpose:
 - Keep the entrypoint thin.
@@ -60,7 +60,7 @@ class TimedWalkthroughPolicy:
 
 class TradingSession:
     """
-    PSEUDOCODE ONLY.
+    Main state machine logic.
 
     Main idea:
     - Start with one full Iron Fly.
@@ -195,7 +195,7 @@ class TradingSession:
         """
         Main event loop.
 
-        Pseudocode flow:
+        Event flow:
         1. Reconcile broker state first.
         2. Update state machine from confirmed fills/orders.
         3. Evaluate actions for current state.
@@ -379,10 +379,12 @@ class TradingSession:
                 mark_pts=self._current_mark_price(),
                 be_lo=be_lo,
                 be_hi=be_hi,
-                ph_n=1 if in_window else None,
-                sl_base=self.stop_loss_max if in_window else None,
+                ph_n=1,
+                sl_base=self.stop_loss_max,
                 sl_eff=self._effective_stop_loss_usd(),
                 tp_live=self._effective_take_profit_usd(),
+                sl_eff_pct=self.stop_loss_pct,
+                tp_live_pct=self.take_profit_pct,
 
                 sc_k=leg_metrics["sc_k"],
                 sc_m=leg_metrics["sc_m"],
@@ -1001,13 +1003,13 @@ class TradingSession:
 
         entry_credit_usd = entry_credit * self.contract_multiplier
         if entry_credit_usd < self.entry_gate_min_credit:
-            self.output.log(
-                "info",
-                "entry skipped, credit below minimum",
-                entry_credit_usd=round(entry_credit_usd, 2),
-                min_entry_credit=self.entry_gate_min_credit,
-                entry_gate_time_tolerance_seconds=self.entry_gate_time_tolerance_seconds,
-            )
+            # Credit insufficient: entry gate must fully evaluate before allowing entry attempts.
+            # The gate evaluation (in _evaluate_market_start_entry_gate) will decide if we're
+            # still within the grace period (waiting for credit to improve) or past it (blocked for day).
+            if not self.entry_start_gate_checked:
+                # Gate still evaluating: during grace period, do not log repeatedly
+                return []
+            # Gate evaluation complete (either passed or blocked): at this point credit < min means day-blocked
             return []
 
         combo_contract = self.broker.build_iron_fly_combo_contract(self._current_iron_fly_spec())
@@ -1480,7 +1482,7 @@ class TradingSession:
         self._confirm_exit_fill(fill, now)
 
     def fail_safe_exit(self):
-        # Pseudocode:
+        # Logic:
         # - flatten all remaining exposure
         # - mark strategy as terminal / error state
         self.output.log("error", "fail safe exit requested", state=self.state)
