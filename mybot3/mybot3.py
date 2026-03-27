@@ -26,8 +26,8 @@ IBKR_DEFAULT_CLIENT_ID = 101
 # - strategies.mybot_sltp.market_start_time / market_end_time
 # - risk_policies.3phases_12_14-30_mybot
 # - analysis.valid_day
-SESSION_START_TIME_LOCAL = "11:45"
-SESSION_END_TIME_LOCAL = "15:45"
+SESSION_START_TIME_NYSE = "11:45"  # 15:45 UTC (EDT, Mar-Nov) / 16:45 UTC (EST, Nov-Mar)
+SESSION_END_TIME_NYSE = "15:45"  # 19:45 UTC (EDT, Mar-Nov) / 20:45 UTC (EST, Nov-Mar)
 
 VALID_DAY_POLICY = {
     # Replay-quality gate for daily/run summaries.
@@ -40,6 +40,7 @@ VALID_DAY_POLICY = {
 TAKE_PROFIT_PCT = 15
 STOP_LOSS_PCT = 70
 STOP_LOSS_MAX = -1000
+ENABLE_BREAK_EVEN = False
 WINGSIZE = 15
 MIN_ENTRY_CREDIT = 1175
 ENTRY_GATE_TIME_TOLERANCE_SECONDS = 60
@@ -94,7 +95,7 @@ def validate_processed_args(parser: argparse.ArgumentParser, args: argparse.Name
         parser.error("--entry-gate-time-tolerance-seconds must be greater than or equal to zero")
     if float(args.entry_gate_min_credit_usd) < 0:
         parser.error("--entry-gate-min-credit-usd must be greater than or equal to zero")
-    if str(args.entry_gate_start_time_local) > str(SESSION_END_TIME_LOCAL):
+    if str(args.entry_gate_start_time_local) > str(SESSION_END_TIME_NYSE):
         parser.error("--entry-gate-start-time-local must be less than or equal to the configured session end time")
     # Timer-based test scenarios are shared by paper/live/processed, but the numeric
     # timer options only make sense when a concrete scenario is selected.
@@ -204,7 +205,7 @@ def _build_run_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--entry-gate-start-time-local",
         type=parse_local_hhmm,
-        default=SESSION_START_TIME_LOCAL,
+        default=SESSION_START_TIME_NYSE,
         help="One-time entry gate time in HH:MM local exchange time; before this time no entries are allowed.",
     )
     parser.add_argument(
@@ -432,7 +433,7 @@ def main() -> int:
     )
 
     output.log("info", "mybot3 entrypoint", run_id=output.run_id, mode=mode, output_dir=str(output.run_dir))
-    output.log("info", "session window configured", session_start=SESSION_START_TIME_LOCAL, session_end=SESSION_END_TIME_LOCAL)
+    output.log("info", "session window configured", session_start=SESSION_START_TIME_NYSE, session_end=SESSION_END_TIME_NYSE)
     output.log(
         "info",
         "entry gate configured",
@@ -488,8 +489,8 @@ def main() -> int:
             broker=broker,
             output=output,
             trade_date=trade_date,
-            market_start_time=SESSION_START_TIME_LOCAL,
-            market_end_time=SESSION_END_TIME_LOCAL,
+            market_start_time=SESSION_START_TIME_NYSE,
+            market_end_time=SESSION_END_TIME_NYSE,
             take_profit_pct=TAKE_PROFIT_PCT,
             stop_loss_pct=STOP_LOSS_PCT,
             stop_loss_max=STOP_LOSS_MAX,
@@ -502,6 +503,7 @@ def main() -> int:
             entry_gate_min_credit=args.entry_gate_min_credit_usd,
             entry_gate_time_tolerance_seconds=args.entry_gate_time_tolerance_seconds,
             timed_walkthrough_policy=timed_walkthrough_policy,
+            enable_break_even=ENABLE_BREAK_EVEN,
         )
 
         output.log("info", "session initialized", initial_state=trading_session.state, trade_date=trade_date.isoformat())

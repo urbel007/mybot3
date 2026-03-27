@@ -90,6 +90,7 @@ class TradingSession:
         entry_gate_min_credit: float | None = None,
         entry_gate_time_tolerance_seconds: float = 0.0,
         timed_walkthrough_policy: TimedWalkthroughPolicy | None = None,
+        enable_break_even: bool = True,
     ):
         self.state = "FLAT"
         self.broker = broker
@@ -109,6 +110,7 @@ class TradingSession:
         self.entry_gate_min_credit = float(entry_gate_min_credit) if entry_gate_min_credit is not None else float(min_entry_credit)
         self.entry_gate_time_tolerance_seconds = max(0.0, float(entry_gate_time_tolerance_seconds))
         self.timed_walkthrough_policy = timed_walkthrough_policy
+        self.enable_break_even = bool(enable_break_even)
         self.exchange_timezone = ZoneInfo("America/New_York")
 
         self.active_structure = None
@@ -1093,7 +1095,7 @@ class TradingSession:
         if self._has_open_protection_orders("iron_fly"):
             return []
 
-        if self._timed_walkthrough_be_due(now):
+        if self.enable_break_even and self._timed_walkthrough_be_due(now):
             self._submit_break_even_reduction(
                 market_snapshot=market_snapshot,
                 now=now,
