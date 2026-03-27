@@ -649,8 +649,8 @@ class IBKRBroker(MyBot3BrokerProtocol):
 
     def _build_broker_snapshot(self, *, trade_date: date, event_time: datetime) -> BrokerSnapshot:
         try:
-            self._refresh_tracked_order_statuses()
             fills = self._collect_new_ib_fills(event_time=event_time)
+            self._refresh_tracked_order_statuses()
         except Exception:
             fills = []
         return BrokerSnapshot(
@@ -1043,7 +1043,9 @@ class IBKRBroker(MyBot3BrokerProtocol):
     ) -> tuple[Any, int]:
         quantity = int(combo_contract.raw.get("structure", {}).get("quantity", 1))
         order_type = str(order.raw.get("orderType") or "MKT").upper()
-        order_action = "SELL" if purpose == "entry" else "BUY"
+        # BAG leg directions are already encoded per-leg in _combo_leg_action.
+        # Keep parent order action stable to avoid inverting the intended leg side.
+        order_action = "BUY"
         limit_price = order.raw.get("lmtPrice")
         signed_limit_price = None
         if limit_price is not None:

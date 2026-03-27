@@ -174,6 +174,7 @@ class RuntimeOrderState:
     filled_quantity: int = 0
     remaining_quantity: int = 0
     avg_fill_price: float | None = None
+    fill_recorded: bool = False
 
 
 def normalize_broker_order_status(status: str | None, *, parent_order_id: str | None = None) -> str:
@@ -264,9 +265,12 @@ class ComboOrderRuntime:
         metadata: dict[str, Any] | None = None,
     ) -> BrokerFill | None:
         state = self.order_states.get(order_id)
-        if state is None or state.status == "filled":
+        if state is None or state.fill_recorded:
             return None
 
+        # Keep a separate fill marker so we can still process the first fill event
+        # even if broker status polling marked the order as filled earlier.
+        state.fill_recorded = True
         state.status = "filled"
         state.filled_quantity = int(state.quantity)
         state.remaining_quantity = 0

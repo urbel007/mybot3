@@ -603,8 +603,9 @@ class TradingSession:
         sl_from_pct = -(entry_credit * self.contract_multiplier * self.stop_loss_pct / 100.0)
         effective_sl = max(sl_from_pct, float(self.stop_loss_max))
         stop_loss_price = entry_credit + (abs(effective_sl) / self.contract_multiplier)
+        use_market = self.timed_walkthrough_policy is not None
         return BracketSpec(
-            entry_limit_price=entry_credit,
+            entry_limit_price=None if use_market else entry_credit,
             take_profit_price=take_profit_price,
             stop_loss_price=stop_loss_price,
         )
@@ -1101,7 +1102,7 @@ class TradingSession:
                 if self.pending_transition == "break_even_fill_confirmed" and self._position_for_type("credit_spread") is not None:
                     self._confirm_break_even_fill(None, broker_snapshot.timestamp)
                     return
-                if self.pending_transition == "exit_fill_confirmed" and self._current_position() is None:
+                if self.pending_transition == "exit_fill_confirmed" and self._current_position() is None and not self._has_pending_open_orders():
                     self._confirm_exit_fill(None, broker_snapshot.timestamp)
                 return
             if self.pending_transition == "entry_fill_confirmed":
@@ -1131,6 +1132,15 @@ class TradingSession:
             if order.order_id in pending and order.status == "rejected":
                 return order
         return None
+
+    def _has_pending_open_orders(self) -> bool:
+        pending = set(self.pending_orders)
+        if not pending:
+            return False
+        for order in self.last_open_orders:
+            if order.order_id in pending and order.status in {"submitted", "held"}:
+                return True
+        return False
 
     def _broker_managed_exit_fill(self, fills: list[BrokerFill]) -> BrokerFill | None:
         expected_structure_type = "iron_fly" if self.state == "IRON_FLY_ACTIVE" else "credit_spread"
@@ -1169,6 +1179,9 @@ class TradingSession:
         self.exit_reason = None
         trade_id = str(self.pending_context.get("trade_id") or self._next_trade_id())
         fill_credit = float(fill.fill_price) if fill is not None and fill.fill_price is not None else float(self.pending_context["entry_credit"])
+        # IBKR combo entry fills can arrive as signed SELL prices (negative credit).
+        # The session model stores credit as a positive value for PnL/TP/SL math.
+        fill_credit = abs(fill_credit)
         self.iron_fly_position = IronFlyPosition(
             entry_mark=float(self.pending_context["entry_mark"]),
             entry_credit=fill_credit,
