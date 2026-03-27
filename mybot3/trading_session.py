@@ -81,6 +81,10 @@ class TradingSession:
         take_profit_pct: float,
         stop_loss_pct: float,
         stop_loss_max: float,
+        wingsize: float = 15,
+        min_entry_credit: float = 5.0,
+        quantity: int = 1,
+        contract_multiplier: int = 100,
         timed_walkthrough_policy: TimedWalkthroughPolicy | None = None,
     ):
         self.state = "FLAT"
@@ -92,11 +96,13 @@ class TradingSession:
         self.take_profit_pct = float(take_profit_pct)
         self.stop_loss_pct = float(stop_loss_pct)
         self.stop_loss_max = float(stop_loss_max)
+        self.wingsize = float(wingsize)
+        self.min_entry_credit = float(min_entry_credit)
+        self.quantity = int(quantity)
+        self.contract_multiplier = int(contract_multiplier)
         self.activation_profit: float | None = None
         self.trail_distance: float | None = None
         self.timed_walkthrough_policy = timed_walkthrough_policy
-        self.quantity = 1
-        self.contract_multiplier = 100
         self.exchange_timezone = ZoneInfo("America/New_York")
 
         self.active_structure = None
@@ -839,8 +845,8 @@ class TradingSession:
             legs=(
                 StructureLeg(label="short_call", right="C", strike=center_strike, expiry=expiry),
                 StructureLeg(label="short_put", right="P", strike=center_strike, expiry=expiry),
-                StructureLeg(label="long_call", right="C", strike=center_strike + 20.0, expiry=expiry),
-                StructureLeg(label="long_put", right="P", strike=center_strike - 20.0, expiry=expiry),
+                StructureLeg(label="long_call", right="C", strike=center_strike + self.wingsize, expiry=expiry),
+                StructureLeg(label="long_put", right="P", strike=center_strike - self.wingsize, expiry=expiry),
             ),
         )
         self.active_structure = SessionStructure(
@@ -911,6 +917,16 @@ class TradingSession:
         if entry_mark is None or entry_credit is None:
             return []
 
+        entry_credit_usd = entry_credit * self.contract_multiplier
+        if entry_credit_usd < self.min_entry_credit:
+            self.output.log(
+                "info",
+                "entry skipped, credit below minimum",
+                entry_credit_usd=round(entry_credit_usd, 2),
+                min_entry_credit=self.min_entry_credit,
+            )
+            return []
+
         combo_contract = self.broker.build_iron_fly_combo_contract(self._current_iron_fly_spec())
         bracket_spec = self._entry_bracket(entry_credit)
         bracket_orders = self.broker.build_entry_bracket_for_combo(
@@ -944,7 +960,7 @@ class TradingSession:
             "entry_mark": entry_mark,
             "entry_credit": entry_credit,
             "center_strike": self._nearest_5_strike(market_snapshot.underlying_price),
-            "wingsize": 20.0,
+            "wingsize": self.wingsize,
             "order_id": broker_order_ids[0],
             "trade_id": trade_id,
         }

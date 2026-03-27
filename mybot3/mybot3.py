@@ -37,9 +37,13 @@ VALID_DAY_POLICY = {
     "pct_trusted_rows_in_window": 80.0,
 }
 
-TAKE_PROFIT_PCT = 25
-STOP_LOSS_PCT = 37
-STOP_LOSS_MAX = -600
+TAKE_PROFIT_PCT = 10
+STOP_LOSS_PCT = 70
+STOP_LOSS_MAX = -800
+WINGSIZE = 15
+MIN_ENTRY_CREDIT = 1082
+QUANTITY = 1
+CONTRACT_MULTIPLIER = 100
 
 LOG_LEVEL_CHOICES = ["NOTSET", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 NEW_YORK_TIMEZONE = ZoneInfo("America/New_York")
@@ -438,6 +442,10 @@ def main() -> int:
             take_profit_pct=TAKE_PROFIT_PCT,
             stop_loss_pct=STOP_LOSS_PCT,
             stop_loss_max=STOP_LOSS_MAX,
+            wingsize=WINGSIZE,
+            min_entry_credit=MIN_ENTRY_CREDIT,
+            quantity=QUANTITY,
+            contract_multiplier=CONTRACT_MULTIPLIER,
             timed_walkthrough_policy=timed_walkthrough_policy,
         )
 
