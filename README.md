@@ -10,14 +10,22 @@
 - (optional) **Git** if you clone from a repo
 - (optional) ripgrep (install via powershell: winget install --id BurntSushi.ripgrep.MSVC --exact)
 
+## get from git
+
+## setup virtual environment
+PS C:\Users\urbel> cd 'C:\Projects\mybot3\'
+PS C:\Projects\mybot3> python -m venv .venv
+PS C:\Projects\mybot3> .\.venv\Scripts\activate
+
 ## Install & Run
+
 
 **Note:**
 - PowerShell is supported; if script execution is blocked, activate the venv after adjusting your local execution policy.
 - In VS Code, select the interpreter once via `Python: Select Interpreter` and choose `.venv`.
 
 PS C:\Users\urbel> cd 'C:\Projects\mybot3\'
-PS C:\Projects\mybot2> .\.venv\Scripts\activate
+PS C:\Projects\mybot3> .\.venv\Scripts\activate
 
 
 # Install runtime deps

@@ -1,0 +1,8 @@
+#pydantic>=2.7.0
+#pyyaml
+pandas>=2.2.0
+#databento>=0.38
+#pyarrow>=14.0
+#tqdm>=4.66
+#matplotlib>=3.8
+ib_insync>=0.9.86
