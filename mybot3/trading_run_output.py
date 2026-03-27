@@ -9,8 +9,6 @@ from typing import Any
 
 import pandas as pd
 
-from mybot3.risk_days import RiskDayManager
-
 
 LOG_LEVELS = {
     "NOTSET": logging.NOTSET,
@@ -130,8 +128,6 @@ DAILY_SUMMARY_COLUMNS = [
     "state_end",   # Final state of the day.
     "ticks",       # Number of recorded ticks.
     "fills",       # Total fill count.
-    "is_risk_day", # True when the trade date exists in risk_events.json.
-    "risk_categories", # Comma-separated macro event categories for the trade date.
 
     # Quote quality
     "pct_q_ok",    # Percent of trusted quotes.
@@ -181,7 +177,6 @@ RUN_SUMMARY_COLUMNS = [
     "run_id",            # Run identifier.
     "variant_id",        # Stable identifier for the sweep variant.
     "validity_bucket",   # valid_only | all_days.
-    "day_type",          # all_days | risk_day.
 
     # Sample size
     "num_days",          # Number of daily summary rows in this subset.
@@ -521,7 +516,6 @@ class TradingRunOutput:
         log_level: str = "INFO",
         valid_day_policy: dict[str, float | int] | None = None,
         emit_live_tick_lines: bool = False,
-        risk_day_manager: RiskDayManager | None = None,
     ):
         self.base_dir = Path(base_dir)
         self.run_id = run_id or f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_m3"
@@ -542,7 +536,6 @@ class TradingRunOutput:
             **default_valid_day_policy,
             **(valid_day_policy or {}),
         }
-        self.risk_day_manager = risk_day_manager or RiskDayManager()
         self.log_level_name = str(log_level).upper()
         if self.log_level_name not in LOG_LEVELS:
             raise ValueError(f"Unsupported log level '{log_level}'")
@@ -1373,25 +1366,19 @@ class TradingRunOutput:
                 scoped_frame = variant_frame
                 if validity_bucket == "valid_only":
                     scoped_frame = variant_frame[variant_frame["valid"] == True]
-                for day_type in ("all_days", "risk_day"):
-                    subset_frame = scoped_frame
-                    if day_type == "risk_day":
-                        subset_frame = scoped_frame[scoped_frame["is_risk_day"] == True]
-                    if subset_frame.empty:
-                        continue
-                    rendered_rows.append(
-                        self._build_run_summary_row(
-                            subset_frame.copy(),
-                            validity_bucket=validity_bucket,
-                            day_type=day_type,
-                        )
+                if scoped_frame.empty:
+                    continue
+                rendered_rows.append(
+                    self._build_run_summary_row(
+                        scoped_frame.copy(),
+                        validity_bucket=validity_bucket,
                     )
+                )
         return rendered_rows
 
     def _build_daily_summary_row(self, trade_date: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
         ordered_rows = sorted(rows, key=lambda row: str(row.get("ts") or ""))
         last_row = ordered_rows[-1]
-        is_risk_day, risk_categories = self._resolve_risk_day(trade_date)
 
         def last_non_null(column: str) -> Any:
             for row in reversed(ordered_rows):
@@ -1447,8 +1434,6 @@ class TradingRunOutput:
             "state_end": last_row.get("state"),
             "ticks": len(ordered_rows),
             "fills": sum(int(row.get("fills") or 0) for row in ordered_rows),
-            "is_risk_day": is_risk_day,
-            "risk_categories": risk_categories,
 
             # Quote quality
             "pct_q_ok": round(pct_trusted_quotes, 2) if pct_trusted_quotes is not None else None,
@@ -1492,22 +1477,6 @@ class TradingRunOutput:
             "tr_dist_p3": last_non_null("tr_dist_p3"),
         }
         return summary
-
-    def _resolve_risk_day(self, trade_date: str) -> tuple[bool, str | None]:
-        try:
-            status = self.risk_day_manager.get_risk_status(trade_date)
-        except Exception:
-            return False, None
-
-        categories: list[str] = []
-        seen: set[str] = set()
-        for event in status.events:
-            category = str(event.category or "").strip()
-            if not category or category in seen:
-                continue
-            seen.add(category)
-            categories.append(category)
-        return bool(status.is_risk_day), ",".join(categories) if categories else None
 
     def _evaluate_valid_day(self, ordered_rows: list[dict[str, Any]]) -> dict[str, Any]:
         if not ordered_rows:
@@ -1602,7 +1571,6 @@ class TradingRunOutput:
         summary_frame: pd.DataFrame,
         *,
         validity_bucket: str,
-        day_type: str,
     ) -> dict[str, Any]:
         pnl = pd.to_numeric(summary_frame["r_pnl"], errors="coerce")
         intraday_drawdown = pd.to_numeric(summary_frame["min_t_pnl"], errors="coerce")
@@ -1638,7 +1606,6 @@ class TradingRunOutput:
             "run_id": self.run_id,
             "variant_id": self._series_first(summary_frame["variant_id"]) or "default",
             "validity_bucket": validity_bucket,
-            "day_type": day_type,
             "num_days": num_days,
             "win_days": win_days,
             "loss_days": loss_days,
@@ -1685,7 +1652,7 @@ class TradingRunOutput:
         summary_rows = [
             {
                 "variant_id": str(row.get("variant_id") or "default"),
-                "scope": f"{row['validity_bucket']} / {row['day_type']}",
+                "scope": row['validity_bucket'],
                 "days": self._format_summary_metric_value(row.get("num_days")),
                 "total_pnl": self._format_summary_metric_value(row.get("total_pnl")),
                 "mean_pnl": self._format_summary_metric_value(row.get("mean_pnl")),

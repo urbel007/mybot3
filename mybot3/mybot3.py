@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 
 from mybot3.ibkr_broker import IBKRBroker
 from mybot3.processed_broker import ProcessedBroker, ProcessedReplayInput
-from mybot3.risk_days import DEFAULT_RISK_EVENTS_PATH, RiskDayManager, RiskDayStatus
 from mybot3.trading_run_output import TradingRunOutput
 from mybot3.trading_session import TimedWalkthroughPolicy, TradingPhase, TradingSession
 
@@ -36,14 +35,6 @@ VALID_DAY_POLICY = {
     # appears inside the evaluated window, or when trusted rows drop below 80%.
     "max_gap_seconds_not_trusted": 120,
     "pct_trusted_rows_in_window": 80.0,
-}
-
-RISK_DAY_POLICY = {
-    # Trade-calendar gate for session entry.
-    # False => if trade_date is tagged by risk_events.json (for example CPI/FOMC/NFP),
-    # the session stays FLAT and no entry orders are submitted.
-    # True  => risk days are allowed and only tagged in the outputs.
-    "trade_on_risk_days": True,
 }
 
 ZONE_TIMES_LOCAL = ["12:00", "14:30"]
@@ -266,27 +257,9 @@ def _build_run_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_refresh_risk_days_parser() -> argparse.ArgumentParser:
-    # Maintenance command for refreshing data/metadata/riskevents/risk_events.json.
-    # Example:
-    # - python -m mybot3.mybot3 refresh-risk-days --fred-api-key <KEY> --start-year 2026 --end-year 2026
-    parser = argparse.ArgumentParser(description="Refresh macro risk days into risk_events.json")
-    parser.add_argument("--fred-api-key", required=True, help="FRED API key for CPI/NFP release dates")
-    parser.add_argument("--start-year", type=int, default=datetime.now(timezone.utc).year)
-    parser.add_argument("--end-year", type=int, default=datetime.now(timezone.utc).year)
-    parser.add_argument("--out", type=Path, default=DEFAULT_RISK_EVENTS_PATH)
-    return parser
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     command = raw_argv[0] if raw_argv else None
-    if command == "refresh-risk-days":
-        # Explicit subcommand path for risk-calendar maintenance.
-        parser = _build_refresh_risk_days_parser()
-        args = parser.parse_args(raw_argv[1:])
-        args.command = "refresh-risk-days"
-        return args
 
     if command == "run":
         # Optional explicit alias so both of these work:
@@ -407,29 +380,11 @@ def log_nyse_status_if_closed(*, broker: object, output: TradingRunOutput) -> No
     )
 
 
-def resolve_risk_day_status(*, risk_day_manager: RiskDayManager, trade_date: date) -> RiskDayStatus:
-    try:
-        return risk_day_manager.get_risk_status(trade_date)
-    except Exception:
-        return RiskDayStatus(date=trade_date, is_risk_day=False, events=())
-
 
 def main() -> int:
     args = parse_args()
-    if getattr(args, "command", "run") == "refresh-risk-days":
-        # Refresh command exits early and does not initialize trading runtime objects.
-        manager = RiskDayManager(store_path=args.out)
-        events = manager.refresh_from_web(
-            fred_api_key=args.fred_api_key,
-            start_year=args.start_year,
-            end_year=args.end_year,
-        )
-        print(f"Wrote {len(events)} events to {args.out}")
-        return 0
 
     mode, broker, output_dir = resolve_runtime(args)
-    # Shared calendar instance for both output tagging and entry policy decisions.
-    risk_day_manager = RiskDayManager()
     timed_walkthrough_policy = None
     if args.test_scenario == "timed-walkthrough":
         # Timed walkthrough is a deterministic smoke-test mode:
@@ -450,8 +405,6 @@ def main() -> int:
         output_kwargs["valid_day_policy"] = VALID_DAY_POLICY
     if "emit_live_tick_lines" in inspect.signature(TradingRunOutput).parameters:
         output_kwargs["emit_live_tick_lines"] = mode in {"live", "paper"}
-    if "risk_day_manager" in inspect.signature(TradingRunOutput).parameters:
-        output_kwargs["risk_day_manager"] = risk_day_manager
     output = TradingRunOutput(**output_kwargs)
     output.write_run_metadata(
         {
@@ -466,7 +419,6 @@ def main() -> int:
             "log_level": args.log_level,
             "write_market": args.write_market,
             "valid_day_policy": VALID_DAY_POLICY,
-            "risk_day_policy": RISK_DAY_POLICY,
             "test_scenario": args.test_scenario,
             "be_after_seconds": args.be_after_seconds,
             "exit_after_seconds": args.exit_after_seconds,
@@ -485,7 +437,6 @@ def main() -> int:
     output.log("info", "mybot3 pseudocode entrypoint", run_id=output.run_id, mode=mode, output_dir=str(output.run_dir))
     output.log("info", "market window configured", market_start=MARKET_START_TIME_LOCAL, market_end=MARKET_END_TIME_LOCAL)
     output.log("info", "valid day policy configured", **VALID_DAY_POLICY)
-    output.log("info", "risk day policy configured", **RISK_DAY_POLICY)
     if timed_walkthrough_policy is not None:
         output.log(
             "info",
@@ -516,18 +467,8 @@ def main() -> int:
 
     for session_input in resolve_session_inputs(mode, broker):
         trade_date = session_input.trade_date if isinstance(session_input, ProcessedReplayInput) else session_input
-        # Resolve the macro calendar once per trade date and reuse it across sweep variants.
-        risk_day_status = resolve_risk_day_status(risk_day_manager=risk_day_manager, trade_date=trade_date)
         output.set_variant_context(
             variant_id="default",
-        )
-        output.log(
-            "info",
-            "risk day status resolved",
-            trade_date=trade_date.isoformat(),
-            is_risk_day=risk_day_status.is_risk_day,
-            categories=sorted({event.category for event in risk_day_status.events}),
-            trade_on_risk_days=RISK_DAY_POLICY["trade_on_risk_days"],
         )
         output.log("info", "starting trading session", trade_date=trade_date.isoformat(), mode=mode)
         if isinstance(session_input, ProcessedReplayInput):
@@ -547,8 +488,6 @@ def main() -> int:
             market_end_time=MARKET_END_TIME_LOCAL,
             phases=build_risk_phases(),
             timed_walkthrough_policy=timed_walkthrough_policy,
-            risk_day_status=risk_day_status,
-            trade_on_risk_days=bool(RISK_DAY_POLICY["trade_on_risk_days"]),
             tp_pct=args.tp_pct,
             sl_pct=args.sl_pct,
         )

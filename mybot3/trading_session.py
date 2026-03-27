@@ -14,7 +14,6 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from mybot3.broker import BracketSpec, BrokerFill, BrokerOrderStatus, BrokerPosition, IronFlySpec, MyBot3BrokerProtocol, StructureLeg, StructureMarketDataRequest, StructureQuote
-from mybot3.risk_days import RiskDayStatus
 from mybot3.trading_run_output import DailyDetailRow, TradingRunOutput
 
 
@@ -103,8 +102,6 @@ class TradingSession:
         market_end_time: str,
         phases: list[TradingPhase],
         timed_walkthrough_policy: TimedWalkthroughPolicy | None = None,
-        risk_day_status: RiskDayStatus | None = None,
-        trade_on_risk_days: bool = True,
         tp_pct: float | None = None,
         sl_pct: float | None = None,
     ):
@@ -116,8 +113,6 @@ class TradingSession:
         self.market_end_time = market_end_time
         self.phases = list(phases)
         self.timed_walkthrough_policy = timed_walkthrough_policy
-        self.risk_day_status = risk_day_status
-        self.trade_on_risk_days = bool(trade_on_risk_days)
         self.tp_pct = tp_pct
         self.sl_pct = sl_pct
         self.quantity = 1
@@ -147,7 +142,6 @@ class TradingSession:
         self.break_even_entry_credit: float | None = None
         self.entry_fill_confirmed_at: datetime | None = None
         self.break_even_fill_confirmed_at: datetime | None = None
-        self._risk_day_block_logged = False
 
         self.iron_fly_position = None
         self.credit_spread_position = None
@@ -161,8 +155,6 @@ class TradingSession:
             market_end=self.market_end_time,
             phase_count=len(self.phases),
             timed_walkthrough=bool(self.timed_walkthrough_policy is not None),
-            is_risk_day=bool(self.risk_day_status.is_risk_day) if self.risk_day_status is not None else False,
-            trade_on_risk_days=self.trade_on_risk_days,
         )
 
     def apply_event(self, event_name: str, *, reason: str, **fields) -> str:
@@ -222,14 +214,8 @@ class TradingSession:
         previous_structure = self._current_structure_name()
         previous_position_qty = self._current_position_qty()
 
-        if self.state == "FLAT" and self._risk_day_entry_blocked():
-            self.active_structure = None
-            self.current_structure_quotes = {}
-            self.current_structure_quote_details = {}
-            self._log_risk_day_block_once(now)
-        else:
-            self._ensure_structure_from_snapshot(market_snapshot)
-            self._update_structure_quotes(market_snapshot)
+        self._ensure_structure_from_snapshot(market_snapshot)
+        self._update_structure_quotes(market_snapshot)
         self.output.record_broker_snapshot(broker_snapshot)
         self.reconcile_broker_state(broker_snapshot)
 
@@ -259,35 +245,6 @@ class TradingSession:
             previous_position_qty=previous_position_qty,
         )
         return result
-
-    def _risk_day_entry_blocked(self) -> bool:
-        return bool(
-            self.state == "FLAT"
-            and self.risk_day_status is not None
-            and self.risk_day_status.is_risk_day
-            and not self.trade_on_risk_days
-        )
-
-    def _log_risk_day_block_once(self, now: datetime) -> None:
-        if self._risk_day_block_logged:
-            return
-        categories = sorted({event.category for event in self.risk_day_status.events}) if self.risk_day_status is not None else []
-        self.output.log(
-            "info",
-            "risk day entry blocked",
-            trade_date=self.trade_date.isoformat(),
-            at=now.isoformat(),
-            categories=categories,
-        )
-        self.output.record_session_action(
-            timestamp=now,
-            source="session",
-            stage="policy",
-            event="risk_day_entry_blocked",
-            trade_date=self.trade_date.isoformat(),
-            categories=categories,
-        )
-        self._risk_day_block_logged = True
 
     def _current_phase(self, now: datetime) -> TradingPhase | None:
         current_hhmm = self._local_hhmm(now)
