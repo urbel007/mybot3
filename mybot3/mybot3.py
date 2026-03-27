@@ -26,8 +26,8 @@ IBKR_DEFAULT_CLIENT_ID = 101
 # - strategies.mybot_sltp.market_start_time / market_end_time
 # - risk_policies.3phases_12_14-30_mybot
 # - analysis.valid_day
-MARKET_START_TIME_LOCAL = "10:00"
-MARKET_END_TIME_LOCAL = "15:30"
+MARKET_START_TIME_LOCAL = "11:45"
+MARKET_END_TIME_LOCAL = "15:45"
 
 VALID_DAY_POLICY = {
     # Replay-quality gate for daily/run summaries.
@@ -37,11 +37,11 @@ VALID_DAY_POLICY = {
     "pct_trusted_rows_in_window": 80.0,
 }
 
-TAKE_PROFIT_PCT = 10
+TAKE_PROFIT_PCT = 15
 STOP_LOSS_PCT = 70
 STOP_LOSS_MAX = -800
 WINGSIZE = 15
-MIN_ENTRY_CREDIT = 1082
+MIN_ENTRY_CREDIT = 1175
 QUANTITY = 1
 CONTRACT_MULTIPLIER = 100
 
