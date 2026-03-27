@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from mybot3.ibkr_broker import IBKRBroker
 from mybot3.processed_broker import ProcessedBroker, ProcessedReplayInput
 from mybot3.trading_run_output import TradingRunOutput
-from mybot3.trading_session import TimedWalkthroughPolicy, TradingPhase, TradingSession
+from mybot3.trading_session import TimedWalkthroughPolicy, TradingSession
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -37,16 +37,9 @@ VALID_DAY_POLICY = {
     "pct_trusted_rows_in_window": 80.0,
 }
 
-PHASE_1 = {
-    "name": "phase_1",
-    "window_start": MARKET_START_TIME_LOCAL,
-    "window_end": MARKET_END_TIME_LOCAL,
-    "take_profit_pct": 25,
-    "stop_loss_pct": 37,
-    "stop_loss_max": -600,
-    "activation_profit": None,
-    "trail_distance": None,
-}
+TAKE_PROFIT_PCT = 25
+STOP_LOSS_PCT = 37
+STOP_LOSS_MAX = -600
 
 LOG_LEVEL_CHOICES = ["NOTSET", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 NEW_YORK_TIMEZONE = ZoneInfo("America/New_York")
@@ -97,10 +90,6 @@ def validate_processed_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--test-scenario timed-walkthrough requires --be-after-seconds and --exit-after-seconds")
         if float(args.be_after_seconds) <= 0 or float(args.exit_after_seconds) <= 0:
             parser.error("--be-after-seconds and --exit-after-seconds must be greater than zero")
-
-
-def build_risk_phases() -> list[TradingPhase]:
-    return [TradingPhase(**PHASE_1)]
 
 
 def processed_source_label(args: argparse.Namespace) -> str:
@@ -446,13 +435,15 @@ def main() -> int:
             trade_date=trade_date,
             market_start_time=MARKET_START_TIME_LOCAL,
             market_end_time=MARKET_END_TIME_LOCAL,
-            phases=build_risk_phases(),
+            take_profit_pct=TAKE_PROFIT_PCT,
+            stop_loss_pct=STOP_LOSS_PCT,
+            stop_loss_max=STOP_LOSS_MAX,
             timed_walkthrough_policy=timed_walkthrough_policy,
         )
 
         output.log("info", "session initialized", initial_state=trading_session.state, trade_date=trade_date.isoformat())
         if args.print_config:
-            output.log("info", "risk phases configured", phases=[phase.as_dict() for phase in trading_session.phases])
+            output.log("info", "risk config", take_profit_pct=TAKE_PROFIT_PCT, stop_loss_pct=STOP_LOSS_PCT, stop_loss_max=STOP_LOSS_MAX)
 
         for update in broker.iter_session_updates(trade_date=trade_date):
             output.write_market_data(update)

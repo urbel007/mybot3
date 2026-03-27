@@ -30,30 +30,6 @@ EVENT_TRANSITIONS: dict[tuple[str, str], str] = {
 
 
 @dataclass(frozen=True)
-class TradingPhase:
-    name: str
-    window_start: str
-    window_end: str
-    take_profit_pct: float
-    stop_loss_pct: float
-    stop_loss_max: float
-    activation_profit: float | None = None
-    trail_distance: float | None = None
-
-    def as_dict(self) -> dict[str, str | float | None]:
-        return {
-            "name": self.name,
-            "window_start": self.window_start,
-            "window_end": self.window_end,
-            "take_profit_pct": self.take_profit_pct,
-            "stop_loss_pct": self.stop_loss_pct,
-            "stop_loss_max": self.stop_loss_max,
-            "activation_profit": self.activation_profit,
-            "trail_distance": self.trail_distance,
-        }
-
-
-@dataclass(frozen=True)
 class SessionStructure:
     request: StructureMarketDataRequest
     quote_labels: tuple[str, ...]
@@ -102,7 +78,9 @@ class TradingSession:
         trade_date: date,
         market_start_time: str,
         market_end_time: str,
-        phases: list[TradingPhase],
+        take_profit_pct: float,
+        stop_loss_pct: float,
+        stop_loss_max: float,
         timed_walkthrough_policy: TimedWalkthroughPolicy | None = None,
     ):
         self.state = "FLAT"
@@ -111,7 +89,11 @@ class TradingSession:
         self.trade_date = trade_date
         self.market_start_time = market_start_time
         self.market_end_time = market_end_time
-        self.phases = list(phases)
+        self.take_profit_pct = float(take_profit_pct)
+        self.stop_loss_pct = float(stop_loss_pct)
+        self.stop_loss_max = float(stop_loss_max)
+        self.activation_profit: float | None = None
+        self.trail_distance: float | None = None
         self.timed_walkthrough_policy = timed_walkthrough_policy
         self.quantity = 1
         self.contract_multiplier = 100
@@ -125,7 +107,7 @@ class TradingSession:
         self.pending_context: dict[str, object] = {}
         self.last_open_orders: list[BrokerOrderStatus] = []
         self.last_positions: list[BrokerPosition] = []
-        self.attempted_entry_phases: set[str] = set()
+        self.entry_attempted = False
         self.realized_pnl_usd = 0.0
         self.exit_reason: str | None = None
         self.trade_sequence = 0
@@ -149,7 +131,6 @@ class TradingSession:
             trade_date=self.trade_date.isoformat(),
             market_start=self.market_start_time,
             market_end=self.market_end_time,
-            phase_count=len(self.phases),
             timed_walkthrough=bool(self.timed_walkthrough_policy is not None),
         )
 
@@ -242,28 +223,16 @@ class TradingSession:
         )
         return result
 
-    def _current_phase(self, now: datetime) -> TradingPhase | None:
+    def _is_in_market_window(self, now: datetime) -> bool:
         current_hhmm = self._local_hhmm(now)
-        for phase in self.phases:
-            if phase.window_start <= current_hhmm < phase.window_end:
-                return phase
-        return None
+        return self.market_start_time <= current_hhmm < self.market_end_time
 
-    def _phase_number(self, phase: TradingPhase | None) -> int | None:
-        if phase is None:
-            return None
-        for index, candidate in enumerate(self.phases, start=1):
-            if candidate == phase:
-                return index
-        return None
-
-    def _encode_exit_reason(self, *, reason: str, phase: TradingPhase | None) -> str:
+    def _encode_exit_reason(self, *, reason: str) -> str:
         text = str(reason).strip().lower()
-        phase_number = self._phase_number(phase)
         if "stop loss" in text:
-            return f"sl{phase_number}" if phase_number is not None else "sl"
+            return "sl"
         if "take profit" in text:
-            return f"tp{phase_number}" if phase_number is not None else "tp"
+            return "tp"
         if "market window ended" in text:
             return "time"
         return text.replace(" ", "_")
@@ -352,7 +321,7 @@ class TradingSession:
         previous_structure: str,
         previous_position_qty: int,
     ) -> None:
-        phase = self._current_phase(now)
+        in_window = self._is_in_market_window(now)
         unrealized_pnl = self._current_unrealized_pnl_usd()
         realized_pnl = float(self.realized_pnl_usd)
         if unrealized_pnl is None:
@@ -362,7 +331,7 @@ class TradingSession:
         quality_counts = self._market_quality_counts(market_snapshot)
         metadata = getattr(market_snapshot, "metadata", {}) or {}
         phase_settings = self._phase_settings_snapshot()
-        self._update_trailing_phase_snapshots(phase=phase, total_pnl=total_pnl)
+        self._update_trailing_phase_snapshots(total_pnl=total_pnl)
         be_lo, be_hi = self._current_break_even_bounds()
         leg_metrics = self._tick_leg_metrics()
         self.output.record_daily_detail(
@@ -400,11 +369,11 @@ class TradingSession:
                 mark_pts=self._current_mark_price(),
                 be_lo=be_lo,
                 be_hi=be_hi,
-                ph_n=self._phase_number(phase),
-                sl_base=phase.stop_loss_max if phase is not None else None,
-                sl_eff=self._effective_stop_loss_usd(phase),
-                tp_live=self._effective_take_profit_usd(phase),
-                tr_dist=phase.trail_distance if phase is not None else None,
+                ph_n=1 if in_window else None,
+                sl_base=self.stop_loss_max if in_window else None,
+                sl_eff=self._effective_stop_loss_usd(),
+                tp_live=self._effective_take_profit_usd(),
+                tr_dist=self.trail_distance if in_window else None,
                 tr_on=self.trailing_active,
                 sc_k=leg_metrics["sc_k"],
                 sc_m=leg_metrics["sc_m"],
@@ -431,28 +400,24 @@ class TradingSession:
         upper_be = float(center_strike + entry_credit)
         return lower_be, upper_be
 
-    def _effective_take_profit_usd(self, phase: TradingPhase | None) -> float | None:
-        if phase is None:
-            return None
+    def _effective_take_profit_usd(self) -> float | None:
         entry_credit = self._current_entry_price()
         if entry_credit is not None:
-            return entry_credit * self.contract_multiplier * phase.take_profit_pct / 100.0
+            return entry_credit * self.contract_multiplier * self.take_profit_pct / 100.0
         return None
 
-    def _effective_stop_loss_usd(self, phase: TradingPhase | None) -> float | None:
-        if phase is None:
-            return None
+    def _effective_stop_loss_usd(self) -> float | None:
         entry_credit = self._current_entry_price()
         if entry_credit is not None:
-            sl_from_pct = -(entry_credit * self.contract_multiplier * phase.stop_loss_pct / 100.0)
-            base_sl = max(sl_from_pct, float(phase.stop_loss_max))
+            sl_from_pct = -(entry_credit * self.contract_multiplier * self.stop_loss_pct / 100.0)
+            base_sl = max(sl_from_pct, float(self.stop_loss_max))
         else:
-            base_sl = float(phase.stop_loss_max)
+            base_sl = float(self.stop_loss_max)
         if not self.trailing_active or self.trailing_peak_pnl_usd is None:
             return base_sl
-        if phase.trail_distance is None:
+        if self.trail_distance is None:
             return base_sl
-        return float(max(base_sl, float(self.trailing_peak_pnl_usd) - float(phase.trail_distance)))
+        return float(max(base_sl, float(self.trailing_peak_pnl_usd) - float(self.trail_distance)))
 
     def _tick_leg_metrics(self) -> dict[str, float | None]:
         return {
@@ -490,20 +455,19 @@ class TradingSession:
         return None
 
     def _phase_settings_snapshot(self) -> dict[str, float | None]:
-        phase = self.phases[0] if self.phases else None
         return {
-            "sl_p1": phase.stop_loss_max if phase is not None else None,
-            "tp_p1": phase.take_profit_pct if phase is not None else None,
-            "act_p1": phase.activation_profit if phase is not None else None,
-            "tr_dist_p1": phase.trail_distance if phase is not None else None,
+            "sl_p1": self.stop_loss_max,
+            "tp_p1": self.take_profit_pct,
+            "act_p1": self.activation_profit,
+            "tr_dist_p1": self.trail_distance,
         }
 
-    def _update_trailing_phase_snapshots(self, *, phase: TradingPhase | None, total_pnl: float | None) -> None:
-        if phase is None or total_pnl is None:
+    def _update_trailing_phase_snapshots(self, *, total_pnl: float | None) -> None:
+        if total_pnl is None:
             return
-        if phase.activation_profit is None or phase.trail_distance is None:
+        if self.activation_profit is None or self.trail_distance is None:
             return
-        if total_pnl >= phase.activation_profit:
+        if total_pnl >= self.activation_profit:
             self.trailing_active = True
             if self.trailing_peak_pnl_usd is None or total_pnl > self.trailing_peak_pnl_usd:
                 self.trailing_peak_pnl_usd = float(total_pnl)
@@ -650,11 +614,11 @@ class TradingSession:
             return self._structure_exit_debit(("short_call", "long_call"))
         return self._structure_exit_debit(("short_put", "long_put"))
 
-    def _entry_bracket_from_phase(self, entry_credit: float, phase: TradingPhase) -> BracketSpec:
-        effective_tp = entry_credit * self.contract_multiplier * phase.take_profit_pct / 100.0
+    def _entry_bracket(self, entry_credit: float) -> BracketSpec:
+        effective_tp = entry_credit * self.contract_multiplier * self.take_profit_pct / 100.0
         take_profit_price = max(0.0, entry_credit - (effective_tp / self.contract_multiplier))
-        sl_from_pct = -(entry_credit * self.contract_multiplier * phase.stop_loss_pct / 100.0)
-        effective_sl = max(sl_from_pct, float(phase.stop_loss_max))
+        sl_from_pct = -(entry_credit * self.contract_multiplier * self.stop_loss_pct / 100.0)
+        effective_sl = max(sl_from_pct, float(self.stop_loss_max))
         stop_loss_price = entry_credit + (abs(effective_sl) / self.contract_multiplier)
         return BracketSpec(
             entry_limit_price=entry_credit,
@@ -764,7 +728,6 @@ class TradingSession:
             limit_price=None,
         )
         order_id = self.broker.submit_order(combo_contract=combo_contract, order=order)
-        current_phase = self._current_phase(now)
         self.output.record_order_event(
             timestamp=now,
             event_type="order_submitted",
@@ -772,7 +735,6 @@ class TradingSession:
             trade_id=self.active_trade_id,
             source="session",
             state=self.state,
-            phase=current_phase.name if current_phase is not None else None,
             structure="reduction",
             purpose="break_even_reduction",
             quantity=self.quantity,
@@ -811,7 +773,7 @@ class TradingSession:
     def _begin_exit(self, *, reason: str, pnl: float, now: datetime, **fields) -> None:
         if self.active_structure is None:
             return
-        self.exit_reason = self._encode_exit_reason(reason=reason, phase=self._current_phase(now))
+        self.exit_reason = self._encode_exit_reason(reason=reason)
         combo_contract = self.broker.build_combo_contract_for_structure(
             structure=self.active_structure.request,
             quantity=self.quantity,
@@ -822,7 +784,6 @@ class TradingSession:
             limit_price=None,
         )
         order_id = self.broker.submit_order(combo_contract=combo_contract, order=order)
-        current_phase = self._current_phase(now)
         self.output.record_order_event(
             timestamp=now,
             event_type="order_submitted",
@@ -830,7 +791,6 @@ class TradingSession:
             trade_id=self.active_trade_id,
             source="session",
             state=self.state,
-            phase=current_phase.name if current_phase is not None else None,
             structure=self._current_structure_name(),
             purpose="structure_exit",
             reason=reason,
@@ -941,10 +901,9 @@ class TradingSession:
         if self._tick_transition_event == "entry_rejected":
             return []
 
-        phase = self._current_phase(now)
-        if phase is None or not self._has_complete_quotes():
+        if not self._is_in_market_window(now) or not self._has_complete_quotes():
             return []
-        if phase.name in self.attempted_entry_phases:
+        if self.entry_attempted:
             return []
 
         entry_mark = self._iron_fly_mark()
@@ -953,7 +912,7 @@ class TradingSession:
             return []
 
         combo_contract = self.broker.build_iron_fly_combo_contract(self._current_iron_fly_spec())
-        bracket_spec = self._entry_bracket_from_phase(entry_credit, phase)
+        bracket_spec = self._entry_bracket(entry_credit)
         bracket_orders = self.broker.build_entry_bracket_for_combo(
             combo_contract=combo_contract,
             bracket=bracket_spec,
@@ -973,7 +932,6 @@ class TradingSession:
                 parent_order_id=broker_order_ids[0] if index > 0 and broker_order_ids else None,
                 source="session",
                 state=self.state,
-                phase=phase.name,
                 structure="iron_fly",
                 purpose=order_purposes[index] if index < len(order_purposes) else "submitted",
                 quantity=self.quantity,
@@ -985,18 +943,16 @@ class TradingSession:
         self.pending_context = {
             "entry_mark": entry_mark,
             "entry_credit": entry_credit,
-            "phase_name": phase.name,
             "center_strike": self._nearest_5_strike(market_snapshot.underlying_price),
             "wingsize": 20.0,
             "order_id": broker_order_ids[0],
             "trade_id": trade_id,
         }
-        self.attempted_entry_phases.add(phase.name)
+        self.entry_attempted = True
         self.apply_event(
             "entry_signal",
             reason="whole iron fly entry submitted",
             at=now.isoformat(),
-            phase=phase.name,
             entry_mark=round(entry_mark, 4),
             entry_credit=round(entry_credit, 4),
             order_count=len(broker_order_ids),
@@ -1021,8 +977,7 @@ class TradingSession:
             exit_debit,
             self.iron_fly_position.quantity,
         )
-        phase = self._current_phase(now)
-        if phase is None or self._is_after_market_end(now):
+        if not self._is_in_market_window(now):
             self._begin_exit(
                 reason="market window ended for iron fly",
                 pnl=executable_pnl,
@@ -1045,7 +1000,7 @@ class TradingSession:
             )
             return []
 
-        if executable_pnl <= self._effective_stop_loss_usd(phase):
+        if executable_pnl <= self._effective_stop_loss_usd():
             self._begin_exit(
                 reason="iron fly stop loss reached",
                 pnl=executable_pnl,
@@ -1055,7 +1010,7 @@ class TradingSession:
             )
             return []
 
-        if executable_pnl >= self._effective_take_profit_usd(phase):
+        if executable_pnl >= self._effective_take_profit_usd():
             self._begin_exit(
                 reason="iron fly take profit reached",
                 pnl=executable_pnl,
@@ -1065,7 +1020,7 @@ class TradingSession:
             )
             return []
 
-        if phase.activation_profit is not None and executable_pnl >= phase.activation_profit:
+        if self.activation_profit is not None and executable_pnl >= self.activation_profit:
             self._submit_break_even_reduction(
                 market_snapshot=market_snapshot,
                 now=now,
@@ -1110,8 +1065,7 @@ class TradingSession:
             )
             return []
 
-        phase = self._current_phase(now)
-        if phase is None or self._is_after_market_end(now):
+        if not self._is_in_market_window(now):
             self._begin_exit(
                 reason="market window ended for credit spread",
                 pnl=executable_pnl,
@@ -1121,7 +1075,7 @@ class TradingSession:
             )
             return []
 
-        if executable_pnl <= self._effective_stop_loss_usd(phase):
+        if executable_pnl <= self._effective_stop_loss_usd():
             self._begin_exit(
                 reason="credit spread stop loss reached",
                 pnl=executable_pnl,
@@ -1131,7 +1085,7 @@ class TradingSession:
             )
             return []
 
-        if executable_pnl >= self._effective_take_profit_usd(phase):
+        if executable_pnl >= self._effective_take_profit_usd():
             self._begin_exit(
                 reason="credit spread take profit reached",
                 pnl=executable_pnl,
@@ -1243,7 +1197,6 @@ class TradingSession:
         self.entry_fill_confirmed_at = now
         self.break_even_fill_confirmed_at = None
         self.active_trade_id = trade_id
-        phase_name = self.pending_context.get("phase_name")
         self.pending_orders = []
         self.pending_transition = None
         self.pending_context = {}
@@ -1251,7 +1204,6 @@ class TradingSession:
             "entry_fill_confirmed",
             reason="broker confirmed full iron fly entry fill",
             at=now.isoformat(),
-            phase=phase_name,
             entry_mark=round(self.iron_fly_position.entry_mark, 4),
             entry_credit=round(self.iron_fly_position.entry_credit, 4),
             broker_order_id=fill.order_id if fill is not None else None,
@@ -1263,7 +1215,6 @@ class TradingSession:
             order_id=fill.order_id if fill is not None else None,
             source="session",
             state=self.state,
-            phase=str(phase_name) if phase_name is not None else None,
             structure="iron_fly",
             entry_mark=round(self.iron_fly_position.entry_mark, 4),
             entry_credit=round(self.iron_fly_position.entry_credit, 4),
@@ -1274,7 +1225,6 @@ class TradingSession:
 
     def _reject_pending_entry(self, order: BrokerOrderStatus, now: datetime) -> None:
         order_id = str(self.pending_context.get("order_id") or order.order_id)
-        phase_name = self.pending_context.get("phase_name")
         self.pending_orders = []
         self.pending_transition = None
         self.pending_context = {}
@@ -1283,7 +1233,6 @@ class TradingSession:
             "broker rejected iron fly entry order",
             at=now.isoformat(),
             broker_order_id=order_id,
-            phase=phase_name,
             status=order.status,
         )
         self.apply_event(
@@ -1291,7 +1240,6 @@ class TradingSession:
             reason="broker rejected full iron fly entry order",
             at=now.isoformat(),
             broker_order_id=order_id,
-            phase=phase_name,
             status=order.status,
         )
 
@@ -1414,7 +1362,7 @@ class TradingSession:
             "structure_exit": "broker structure exit filled",
         }
         reason = reason_map.get(fill.purpose, "broker managed exit filled")
-        self.exit_reason = self._encode_exit_reason(reason=reason, phase=self._current_phase(now))
+        self.exit_reason = self._encode_exit_reason(reason=reason)
         self.apply_event(
             "exit_triggered",
             reason=reason,
