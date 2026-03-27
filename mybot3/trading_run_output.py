@@ -39,9 +39,6 @@ DAILY_DETAIL_COLUMNS = [
     "ts",          # Tick timestamp in UTC.
     "date",        # Trading date for the session.
     "variant_id",  # Stable identifier for the sweep variant.
-    "sl1",         # Sweep stop loss for phase 1.
-    "sl2",         # Sweep stop loss for phase 2.
-    "sl3",         # Sweep stop loss for phase 3.
     "und_px",      # Underlying index price.
     "state",       # Session state after this tick.
     "struct",      # Active structure name.
@@ -121,9 +118,6 @@ DAILY_SUMMARY_COLUMNS = [
     # Day summary
     "date",        # Trading date for the day summary.
     "variant_id",  # Stable identifier for the sweep variant.
-    "sl1",         # Sweep stop loss for phase 1.
-    "sl2",         # Sweep stop loss for phase 2.
-    "sl3",         # Sweep stop loss for phase 3.
     "wd",          # Weekday name.
     "ent_ts",      # First detected entry timestamp.
     "ex_ts",       # Final detected exit timestamp.
@@ -186,9 +180,6 @@ RUN_SUMMARY_COLUMNS = [
     # Dimensions
     "run_id",            # Run identifier.
     "variant_id",        # Stable identifier for the sweep variant.
-    "sl1",               # Sweep stop loss for phase 1.
-    "sl2",               # Sweep stop loss for phase 2.
-    "sl3",               # Sweep stop loss for phase 3.
     "validity_bucket",   # valid_only | all_days.
     "day_type",          # all_days | risk_day.
 
@@ -570,9 +561,6 @@ class TradingRunOutput:
         self._trade_journal_seq = 0
         self._variant_context: dict[str, str | float | None] = {
             "variant_id": "default",
-            "sl1": None,
-            "sl2": None,
-            "sl3": None,
         }
 
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -583,15 +571,9 @@ class TradingRunOutput:
         self,
         *,
         variant_id: str | None = None,
-        sl1: float | None,
-        sl2: float | None,
-        sl3: float | None,
     ) -> None:
         self._variant_context = {
             "variant_id": variant_id or "default",
-            "sl1": sl1,
-            "sl2": sl2,
-            "sl3": sl3,
         }
 
     def log(self, level: str, message: str, *, timestamp: datetime | None = None, **fields: Any) -> None:
@@ -900,9 +882,6 @@ class TradingRunOutput:
             "run_id": self.run_id,
             "trade_date": trade_date,
             "variant_id": self._current_variant_fields().get("variant_id"),
-            "sl1": self._current_variant_fields().get("sl1"),
-            "sl2": self._current_variant_fields().get("sl2"),
-            "sl3": self._current_variant_fields().get("sl3"),
             "event_type": event_type,
             "trade_id": trade_id,
             "order_id": order_id,
@@ -1096,9 +1075,6 @@ class TradingRunOutput:
                 "trade_date": self._normalize_trade_date_key(
                     metadata.get("trade_date") or (timestamp.date().isoformat() if isinstance(timestamp, datetime) else datetime.now().date().isoformat())
                 ),
-                "sl1": self._current_variant_fields().get("sl1"),
-                "sl2": self._current_variant_fields().get("sl2"),
-                "sl3": self._current_variant_fields().get("sl3"),
                 "buys": 0,
                 "sells": 0,
                 "buy_quantity": 0,
@@ -1140,9 +1116,9 @@ class TradingRunOutput:
         return "\n".join(sections)
 
     def _render_daily_result_sections(self) -> list[str]:
-        grouped_actions: dict[tuple[str, str, float | None, float | None, float | None], list[dict[str, Any]]] = {}
-        grouped_fill_stats: dict[tuple[str, str, float | None, float | None, float | None], dict[str, dict[str, Any]]] = {}
-        grouped_trade_journal: dict[tuple[str, str, float | None, float | None, float | None], list[dict[str, Any]]] = {}
+        grouped_actions: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        grouped_fill_stats: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+        grouped_trade_journal: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
         for action in self._session_actions:
             trade_date = self._action_trade_date(action)
@@ -1152,14 +1128,14 @@ class TradingRunOutput:
         for instrument_key, stats in self._instrument_fill_stats.items():
             trade_date = self._instrument_trade_date(stats)
             grouped_fill_stats.setdefault(
-                (trade_date, str(stats.get("variant_id") or "default"), stats.get("sl1"), stats.get("sl2"), stats.get("sl3")),
+                (trade_date, str(stats.get("variant_id") or "default")),
                 {},
             )[str(stats.get("instrument") or instrument_key[-1])] = stats
 
         for row in self._trade_journal_rows:
             trade_date = self._normalize_trade_date_key(row.get("trade_date") or datetime.now().date().isoformat())
             grouped_trade_journal.setdefault(
-                (trade_date, str(row.get("variant_id") or "default"), row.get("sl1"), row.get("sl2"), row.get("sl3")),
+                (trade_date, str(row.get("variant_id") or "default")),
                 [],
             ).append(row)
 
@@ -1173,24 +1149,21 @@ class TradingRunOutput:
 
         all_section_keys = sorted(
             set(grouped_actions) | set(grouped_fill_stats) | set(grouped_trade_journal) | detail_section_keys,
-            key=lambda item: (item[0], str(item[1]), str(item[2]), str(item[3]), str(item[4])),
+            key=lambda item: (item[0], str(item[1])),
         )
         if not all_section_keys:
             today = datetime.now().date().isoformat()
-            all_section_keys = [(today, "default", None, None, None)]
+            all_section_keys = [(today, "default")]
 
         return [
             self._render_trading_session_summary(
                 trade_date=trade_date,
                 variant_id=variant_id,
-                sl1=sl1,
-                sl2=sl2,
-                sl3=sl3,
-                actions=grouped_actions.get((trade_date, variant_id, sl1, sl2, sl3), []),
-                fill_stats=grouped_fill_stats.get((trade_date, variant_id, sl1, sl2, sl3), {}),
-                trade_journal_rows=grouped_trade_journal.get((trade_date, variant_id, sl1, sl2, sl3), []),
+                actions=grouped_actions.get((trade_date, variant_id), []),
+                fill_stats=grouped_fill_stats.get((trade_date, variant_id), {}),
+                trade_journal_rows=grouped_trade_journal.get((trade_date, variant_id), []),
             )
-            for trade_date, variant_id, sl1, sl2, sl3 in all_section_keys
+            for trade_date, variant_id in all_section_keys
         ]
 
     def _render_trading_session_summary(
@@ -1198,15 +1171,12 @@ class TradingRunOutput:
         *,
         trade_date: str,
         variant_id: str,
-        sl1: float | None,
-        sl2: float | None,
-        sl3: float | None,
         actions: list[dict[str, Any]],
         fill_stats: dict[str, dict[str, Any]],
         trade_journal_rows: list[dict[str, Any]],
     ) -> str:
         lines = [
-            f"Variant: {self._variant_label(variant_id=variant_id, sl1=sl1, sl2=sl2, sl3=sl3)}",
+            f"Variant: {self._variant_label(variant_id=variant_id)}",
             f"Trade date: {trade_date}",
             f"Run log: {self.log_file}",
             "",
@@ -1376,7 +1346,7 @@ class TradingRunOutput:
         if not self._daily_detail_rows:
             return []
 
-        grouped_rows: dict[tuple[str, str, float | None, float | None, float | None], list[dict[str, Any]]] = {}
+        grouped_rows: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for row in self._daily_detail_rows:
             trade_date = self._normalize_trade_date_key(row.get("date") or datetime.now().date().isoformat())
             variant_key = self._variant_key_from_mapping(row)
@@ -1384,9 +1354,9 @@ class TradingRunOutput:
 
         return [
             self._build_daily_summary_row(trade_date, rows)
-            for (trade_date, _, _, _, _), rows in sorted(
+            for (trade_date, _), rows in sorted(
                 grouped_rows.items(),
-                key=lambda item: (item[0][0], str(item[0][1]), str(item[0][2]), str(item[0][3]), str(item[0][4])),
+                key=lambda item: (item[0][0], str(item[0][1])),
             )
         ]
 
@@ -1397,7 +1367,7 @@ class TradingRunOutput:
 
         summary_frame = pd.DataFrame(daily_summary_rows, columns=DAILY_SUMMARY_COLUMNS)
         rendered_rows: list[dict[str, Any]] = []
-        variant_groups = summary_frame.groupby(["variant_id", "sl1", "sl2", "sl3"], dropna=False, sort=True)
+        variant_groups = summary_frame.groupby(["variant_id"], dropna=False, sort=True)
         for _, variant_frame in variant_groups:
             for validity_bucket in ("valid_only", "all_days"):
                 scoped_frame = variant_frame
@@ -1465,9 +1435,6 @@ class TradingRunOutput:
             # Day summary
             "date": trade_date,
             "variant_id": last_non_null("variant_id") or "default",
-            "sl1": last_non_null("sl1"),
-            "sl2": last_non_null("sl2"),
-            "sl3": last_non_null("sl3"),
             "wd": self._weekday_name(trade_date),
             "ent_ts": entry_time,
             "ex_ts": exit_time,
@@ -1670,9 +1637,6 @@ class TradingRunOutput:
         return {
             "run_id": self.run_id,
             "variant_id": self._series_first(summary_frame["variant_id"]) or "default",
-            "sl1": self._series_first(summary_frame["sl1"]),
-            "sl2": self._series_first(summary_frame["sl2"]),
-            "sl3": self._series_first(summary_frame["sl3"]),
             "validity_bucket": validity_bucket,
             "day_type": day_type,
             "num_days": num_days,
@@ -1721,9 +1685,6 @@ class TradingRunOutput:
         summary_rows = [
             {
                 "variant_id": str(row.get("variant_id") or "default"),
-                "sl1": self._format_summary_metric_value(row.get("sl1")),
-                "sl2": self._format_summary_metric_value(row.get("sl2")),
-                "sl3": self._format_summary_metric_value(row.get("sl3")),
                 "scope": f"{row['validity_bucket']} / {row['day_type']}",
                 "days": self._format_summary_metric_value(row.get("num_days")),
                 "total_pnl": self._format_summary_metric_value(row.get("total_pnl")),
@@ -1741,9 +1702,6 @@ class TradingRunOutput:
         return self._render_text_table(
             columns=[
                 "variant_id",
-                "sl1",
-                "sl2",
-                "sl3",
                 "scope",
                 "days",
                 "total_pnl",
@@ -1758,9 +1716,6 @@ class TradingRunOutput:
             ],
             rows=summary_rows,
             right_align_columns={
-                "sl1",
-                "sl2",
-                "sl3",
                 "days",
                 "total_pnl",
                 "mean_pnl",
@@ -1904,24 +1859,15 @@ class TradingRunOutput:
         return contextualized
 
     def _current_variant_fields(self) -> dict[str, str | float | None]:
-        if self._variant_context.get("variant_id") == "default" and all(
-            self._variant_context.get(key) is None for key in ("sl1", "sl2", "sl3")
-        ):
-            return {"variant_id": "default"}
         return dict(self._variant_context)
 
-    def _variant_key_from_mapping(self, mapping: dict[str, Any]) -> tuple[str, float | None, float | None, float | None]:
+    def _variant_key_from_mapping(self, mapping: dict[str, Any]) -> tuple[str]:
         return (
             str(mapping.get("variant_id") or "default"),
-            mapping.get("sl1"),
-            mapping.get("sl2"),
-            mapping.get("sl3"),
         )
 
-    def _variant_label(self, *, variant_id: str, sl1: float | None, sl2: float | None, sl3: float | None) -> str:
-        if sl1 is None and sl2 is None and sl3 is None:
-            return variant_id
-        return f"{variant_id} (sl1={sl1} sl2={sl2} sl3={sl3})"
+    def _variant_label(self, *, variant_id: str) -> str:
+        return variant_id
 
     def _render_action_detail(self, fields: dict[str, Any]) -> str:
         if not fields:

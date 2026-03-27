@@ -129,10 +129,10 @@ def validate_processed_args(parser: argparse.ArgumentParser, args: argparse.Name
             parser.error("--be-after-seconds and --exit-after-seconds must be greater than zero")
 
 
-def build_risk_phases(*, sl1: float | None = None, sl2: float | None = None, sl3: float | None = None) -> list[TradingPhase]:
-    phase_1 = {**PHASE_1, "stop_loss": PHASE_1["stop_loss"] if sl1 is None else sl1}
-    phase_2 = {**PHASE_2, "stop_loss": PHASE_2["stop_loss"] if sl2 is None else sl2}
-    phase_3 = {**PHASE_3, "stop_loss": PHASE_3["stop_loss"] if sl3 is None else sl3}
+def build_risk_phases() -> list[TradingPhase]:
+    phase_1 = {**PHASE_1}
+    phase_2 = {**PHASE_2}
+    phase_3 = {**PHASE_3}
     return [
         TradingPhase(**phase_1),
         TradingPhase(**phase_2),
@@ -227,6 +227,16 @@ def _build_run_parser() -> argparse.ArgumentParser:
         "--exit-after-seconds",
         type=float,
         help="Seconds after break-even fill before timed-walkthrough submits the final exit order.",
+    )
+    parser.add_argument(
+        "--tp-pct",
+        type=float,
+        help="Take profit as percentage of entry credit. Overrides fixed phase TP values. Example: 20 means 20%% TP.",
+    )
+    parser.add_argument(
+        "--sl-pct",
+        type=float,
+        help="Stop loss as percentage of entry credit. Overrides fixed phase SL values. Example: 50 means 50%% SL.",
     )
     parser.add_argument(
         "--processed-source",
@@ -460,6 +470,8 @@ def main() -> int:
             "test_scenario": args.test_scenario,
             "be_after_seconds": args.be_after_seconds,
             "exit_after_seconds": args.exit_after_seconds,
+            "tp_pct": args.tp_pct,
+            "sl_pct": args.sl_pct,
             "processed_source": args.processed_source,
             "processed_market_dir": str(args.processed_market_dir) if args.processed_market_dir is not None else None,
             "start_date": args.start_date,
@@ -508,9 +520,6 @@ def main() -> int:
         risk_day_status = resolve_risk_day_status(risk_day_manager=risk_day_manager, trade_date=trade_date)
         output.set_variant_context(
             variant_id="default",
-            sl1=None,
-            sl2=None,
-            sl3=None,
         )
         output.log(
             "info",
@@ -540,6 +549,8 @@ def main() -> int:
             timed_walkthrough_policy=timed_walkthrough_policy,
             risk_day_status=risk_day_status,
             trade_on_risk_days=bool(RISK_DAY_POLICY["trade_on_risk_days"]),
+            tp_pct=args.tp_pct,
+            sl_pct=args.sl_pct,
         )
 
         output.log("info", "session initialized", initial_state=trading_session.state, trade_date=trade_date.isoformat())

@@ -105,6 +105,8 @@ class TradingSession:
         timed_walkthrough_policy: TimedWalkthroughPolicy | None = None,
         risk_day_status: RiskDayStatus | None = None,
         trade_on_risk_days: bool = True,
+        tp_pct: float | None = None,
+        sl_pct: float | None = None,
     ):
         self.state = "FLAT"
         self.broker = broker
@@ -116,6 +118,8 @@ class TradingSession:
         self.timed_walkthrough_policy = timed_walkthrough_policy
         self.risk_day_status = risk_day_status
         self.trade_on_risk_days = bool(trade_on_risk_days)
+        self.tp_pct = tp_pct
+        self.sl_pct = sl_pct
         self.quantity = 1
         self.contract_multiplier = 100
         self.exchange_timezone = ZoneInfo("America/New_York")
@@ -456,7 +460,7 @@ class TradingSession:
                 ph_n=self._phase_number(phase),
                 sl_base=phase.stop_loss if phase is not None else None,
                 sl_eff=self._effective_stop_loss_usd(phase),
-                tp_live=phase.take_profit if phase is not None else None,
+                tp_live=self._effective_take_profit_usd(phase),
                 tr_dist=phase.trail_distance if phase is not None else None,
                 tr_on=self.trailing_active,
                 sc_k=leg_metrics["sc_k"],
@@ -484,12 +488,29 @@ class TradingSession:
         upper_be = float(center_strike + entry_credit)
         return lower_be, upper_be
 
+    def _effective_take_profit_usd(self, phase: TradingPhase | None) -> float | None:
+        if phase is None:
+            return None
+        if self.tp_pct is not None:
+            entry_credit = self._current_entry_price()
+            if entry_credit is not None:
+                return entry_credit * self.contract_multiplier * self.tp_pct / 100.0
+        return float(phase.take_profit)
+
     def _effective_stop_loss_usd(self, phase: TradingPhase | None) -> float | None:
         if phase is None:
             return None
+        if self.sl_pct is not None:
+            entry_credit = self._current_entry_price()
+            if entry_credit is not None:
+                base_sl = -(entry_credit * self.contract_multiplier * self.sl_pct / 100.0)
+            else:
+                base_sl = float(phase.stop_loss)
+        else:
+            base_sl = float(phase.stop_loss)
         if not self.trailing_active or self.trailing_peak_pnl_usd is None:
-            return float(phase.stop_loss)
-        return float(max(float(phase.stop_loss), float(self.trailing_peak_pnl_usd) - float(phase.trail_distance)))
+            return base_sl
+        return float(max(base_sl, float(self.trailing_peak_pnl_usd) - float(phase.trail_distance)))
 
     def _tick_leg_metrics(self) -> dict[str, float | None]:
         return {
@@ -693,8 +714,10 @@ class TradingSession:
         return self._structure_exit_debit(("short_put", "long_put"))
 
     def _entry_bracket_from_phase(self, entry_credit: float, phase: TradingPhase) -> BracketSpec:
-        take_profit_price = max(0.0, entry_credit - (phase.take_profit / self.contract_multiplier))
-        stop_loss_price = entry_credit + (abs(phase.stop_loss) / self.contract_multiplier)
+        effective_tp = self._effective_take_profit_usd(phase) or phase.take_profit
+        take_profit_price = max(0.0, entry_credit - (effective_tp / self.contract_multiplier))
+        effective_sl = self._effective_stop_loss_usd(phase) or phase.stop_loss
+        stop_loss_price = entry_credit + (abs(effective_sl) / self.contract_multiplier)
         return BracketSpec(
             entry_limit_price=entry_credit,
             take_profit_price=take_profit_price,
@@ -1084,7 +1107,7 @@ class TradingSession:
             )
             return []
 
-        if executable_pnl <= phase.stop_loss:
+        if executable_pnl <= self._effective_stop_loss_usd(phase):
             self._begin_exit(
                 reason="iron fly stop loss reached",
                 pnl=executable_pnl,
@@ -1094,7 +1117,7 @@ class TradingSession:
             )
             return []
 
-        if executable_pnl >= phase.take_profit:
+        if executable_pnl >= self._effective_take_profit_usd(phase):
             self._begin_exit(
                 reason="iron fly take profit reached",
                 pnl=executable_pnl,
@@ -1160,7 +1183,7 @@ class TradingSession:
             )
             return []
 
-        if executable_pnl <= phase.stop_loss:
+        if executable_pnl <= self._effective_stop_loss_usd(phase):
             self._begin_exit(
                 reason="credit spread stop loss reached",
                 pnl=executable_pnl,
@@ -1170,7 +1193,7 @@ class TradingSession:
             )
             return []
 
-        if executable_pnl >= phase.take_profit:
+        if executable_pnl >= self._effective_take_profit_usd(phase):
             self._begin_exit(
                 reason="credit spread take profit reached",
                 pnl=executable_pnl,
