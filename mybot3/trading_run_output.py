@@ -61,10 +61,6 @@ DAILY_DETAIL_COLUMNS = [
     "q_untrust",   # Untrusted quote count.
     "q_miss",      # Missing quote count.
 
-    # Phase 1
-    "sl_p1",       # Phase 1 stop loss max in USD.
-    "tp_p1",       # Phase 1 take profit in pct.
-
     # Live runtime snapshot
     "mark_pts",    # Current structure mark in points.
     "be_lo",       # Lower break-even level.
@@ -126,9 +122,6 @@ DAILY_SUMMARY_COLUMNS = [
     "sl_base",     # Last base stop loss max in USD.
     "sl_eff",      # Last effective stop loss in USD.
     "tp_live",     # Last live take profit in USD.
-    # Phase 1
-    "sl_p1",       # Phase 1 stop loss max in USD.
-    "tp_p1",       # Phase 1 take profit in pct.
 ]
 
 
@@ -399,9 +392,6 @@ class DailyDetailRow:
     q_untrust: int = 0
     q_miss: int = 0
 
-    # Phase 1
-    sl_p1: float | None = None
-    tp_p1: float | None = None
     # Live runtime snapshot
     mark_pts: float | None = None
     be_lo: float | None = None
@@ -1341,9 +1331,6 @@ class TradingRunOutput:
             "sl_base": last_non_null("sl_base"),
             "sl_eff": last_non_null("sl_eff"),
             "tp_live": last_non_null("tp_live"),
-            # Phase 1
-            "sl_p1": last_non_null("sl_p1"),
-            "tp_p1": last_non_null("tp_p1"),
         }
         return summary
 
