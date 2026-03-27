@@ -43,8 +43,9 @@ PHASE_1 = {
     "name": "phase_1",
     "window_start": MARKET_START_TIME_LOCAL,
     "window_end": ZONE_TIMES_LOCAL[0],
-    "stop_loss": -600,
-    "take_profit": 400,
+    "take_profit_pct": 25,
+    "stop_loss_pct": 37,
+    "stop_loss_max": -600,
     "activation_profit": None,
     "trail_distance": None,
 }
@@ -53,8 +54,9 @@ PHASE_2 = {
     "name": "phase_2",
     "window_start": ZONE_TIMES_LOCAL[0],
     "window_end": ZONE_TIMES_LOCAL[1],
-    "stop_loss": -600,
-    "take_profit": 300,
+    "take_profit_pct": 19,
+    "stop_loss_pct": 37,
+    "stop_loss_max": -600,
     "activation_profit": None,
     "trail_distance": None,
 }
@@ -63,8 +65,9 @@ PHASE_3 = {
     "name": "phase_3",
     "window_start": ZONE_TIMES_LOCAL[1],
     "window_end": MARKET_END_TIME_LOCAL,
-    "stop_loss": -500,
-    "take_profit": 300,
+    "take_profit_pct": 19,
+    "stop_loss_pct": 31,
+    "stop_loss_max": -500,
     "activation_profit": None,
     "trail_distance": None,
 }
@@ -218,16 +221,6 @@ def _build_run_parser() -> argparse.ArgumentParser:
         "--exit-after-seconds",
         type=float,
         help="Seconds after break-even fill before timed-walkthrough submits the final exit order.",
-    )
-    parser.add_argument(
-        "--tp-pct",
-        type=float,
-        help="Take profit as percentage of entry credit. Overrides fixed phase TP values. Example: 20 means 20%% TP.",
-    )
-    parser.add_argument(
-        "--sl-pct",
-        type=float,
-        help="Stop loss as percentage of entry credit. Overrides fixed phase SL values. Example: 50 means 50%% SL.",
     )
     parser.add_argument(
         "--processed-source",
@@ -422,8 +415,6 @@ def main() -> int:
             "test_scenario": args.test_scenario,
             "be_after_seconds": args.be_after_seconds,
             "exit_after_seconds": args.exit_after_seconds,
-            "tp_pct": args.tp_pct,
-            "sl_pct": args.sl_pct,
             "processed_source": args.processed_source,
             "processed_market_dir": str(args.processed_market_dir) if args.processed_market_dir is not None else None,
             "start_date": args.start_date,
@@ -488,8 +479,6 @@ def main() -> int:
             market_end_time=MARKET_END_TIME_LOCAL,
             phases=build_risk_phases(),
             timed_walkthrough_policy=timed_walkthrough_policy,
-            tp_pct=args.tp_pct,
-            sl_pct=args.sl_pct,
         )
 
         output.log("info", "session initialized", initial_state=trading_session.state, trade_date=trade_date.isoformat())

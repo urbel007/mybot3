@@ -63,21 +63,21 @@ DAILY_DETAIL_COLUMNS = [
     "q_miss",      # Missing quote count.
 
     # Phase 1
-    "sl_p1",       # Phase 1 stop loss in USD.
-    "tp_p1",       # Phase 1 take profit in USD.
+    "sl_p1",       # Phase 1 stop loss max in USD.
+    "tp_p1",       # Phase 1 take profit in pct.
     "act_p1",      # Phase 1 trailing activation in USD.
     "tr_dist_p1",  # Phase 1 trailing distance in USD.
 
     # Phase 2
-    "sl_p2",       # Phase 2 stop loss in USD.
-    "tp_p2",       # Phase 2 take profit in USD.
+    "sl_p2",       # Phase 2 stop loss max in USD.
+    "tp_p2",       # Phase 2 take profit in pct.
     "tr_on_p2",    # Trailing already active when phase 2 started.
     "act_p2",      # Phase 2 trailing activation in USD.
     "tr_dist_p2",  # Phase 2 trailing distance in USD.
 
     # Phase 3
-    "sl_p3",       # Phase 3 stop loss in USD.
-    "tp_p3",       # Phase 3 take profit in USD.
+    "sl_p3",       # Phase 3 stop loss max in USD.
+    "tp_p3",       # Phase 3 take profit in pct.
     "tr_on_p3",    # Trailing already active when phase 3 started.
     "act_p3",      # Phase 3 trailing activation in USD.
     "tr_dist_p3",  # Phase 3 trailing distance in USD.
@@ -87,7 +87,7 @@ DAILY_DETAIL_COLUMNS = [
     "be_lo",       # Lower break-even level.
     "be_hi",       # Upper break-even level.
     "ph_n",        # Active phase number.
-    "sl_base",     # Current base stop loss in USD.
+    "sl_base",     # Current base stop loss max in USD.
     "sl_eff",      # Current effective stop loss in USD.
     "tp_live",     # Current live take profit in USD.
     "tr_dist",     # Current live trailing distance in USD.
@@ -144,28 +144,28 @@ DAILY_SUMMARY_COLUMNS = [
     "mark_pts",    # Last structure mark in points.
     "be_lo",       # Last lower break-even level.
     "be_hi",       # Last upper break-even level.
-    "sl_base",     # Last base stop loss in USD.
+    "sl_base",     # Last base stop loss max in USD.
     "sl_eff",      # Last effective stop loss in USD.
     "tp_live",     # Last live take profit in USD.
     "tr_dist",     # Last live trailing distance in USD.
     "tr_on",       # Last live trailing active flag.
 
     # Phase 1
-    "sl_p1",       # Phase 1 stop loss in USD.
-    "tp_p1",       # Phase 1 take profit in USD.
+    "sl_p1",       # Phase 1 stop loss max in USD.
+    "tp_p1",       # Phase 1 take profit in pct.
     "act_p1",      # Phase 1 trailing activation in USD.
     "tr_dist_p1",  # Phase 1 trailing distance in USD.
 
     # Phase 2
-    "sl_p2",       # Phase 2 stop loss in USD.
-    "tp_p2",       # Phase 2 take profit in USD.
+    "sl_p2",       # Phase 2 stop loss max in USD.
+    "tp_p2",       # Phase 2 take profit in pct.
     "tr_on_p2",    # Trailing already active when phase 2 started.
     "act_p2",      # Phase 2 trailing activation in USD.
     "tr_dist_p2",  # Phase 2 trailing distance in USD.
 
     # Phase 3
-    "sl_p3",       # Phase 3 stop loss in USD.
-    "tp_p3",       # Phase 3 take profit in USD.
+    "sl_p3",       # Phase 3 stop loss max in USD.
+    "tp_p3",       # Phase 3 take profit in pct.
     "tr_on_p3",    # Trailing already active when phase 3 started.
     "act_p3",      # Phase 3 trailing activation in USD.
     "tr_dist_p3",  # Phase 3 trailing distance in USD.

@@ -34,18 +34,20 @@ class TradingPhase:
     name: str
     window_start: str
     window_end: str
-    stop_loss: float
-    take_profit: float
+    take_profit_pct: float
+    stop_loss_pct: float
+    stop_loss_max: float
     activation_profit: float | None = None
     trail_distance: float | None = None
 
-    def as_dict(self) -> dict[str, str | float]:
+    def as_dict(self) -> dict[str, str | float | None]:
         return {
             "name": self.name,
             "window_start": self.window_start,
             "window_end": self.window_end,
-            "stop_loss": self.stop_loss,
-            "take_profit": self.take_profit,
+            "take_profit_pct": self.take_profit_pct,
+            "stop_loss_pct": self.stop_loss_pct,
+            "stop_loss_max": self.stop_loss_max,
             "activation_profit": self.activation_profit,
             "trail_distance": self.trail_distance,
         }
@@ -102,8 +104,6 @@ class TradingSession:
         market_end_time: str,
         phases: list[TradingPhase],
         timed_walkthrough_policy: TimedWalkthroughPolicy | None = None,
-        tp_pct: float | None = None,
-        sl_pct: float | None = None,
     ):
         self.state = "FLAT"
         self.broker = broker
@@ -113,8 +113,6 @@ class TradingSession:
         self.market_end_time = market_end_time
         self.phases = list(phases)
         self.timed_walkthrough_policy = timed_walkthrough_policy
-        self.tp_pct = tp_pct
-        self.sl_pct = sl_pct
         self.quantity = 1
         self.contract_multiplier = 100
         self.exchange_timezone = ZoneInfo("America/New_York")
@@ -415,7 +413,7 @@ class TradingSession:
                 be_lo=be_lo,
                 be_hi=be_hi,
                 ph_n=self._phase_number(phase),
-                sl_base=phase.stop_loss if phase is not None else None,
+                sl_base=phase.stop_loss_max if phase is not None else None,
                 sl_eff=self._effective_stop_loss_usd(phase),
                 tp_live=self._effective_take_profit_usd(phase),
                 tr_dist=phase.trail_distance if phase is not None else None,
@@ -448,23 +446,20 @@ class TradingSession:
     def _effective_take_profit_usd(self, phase: TradingPhase | None) -> float | None:
         if phase is None:
             return None
-        if self.tp_pct is not None:
-            entry_credit = self._current_entry_price()
-            if entry_credit is not None:
-                return entry_credit * self.contract_multiplier * self.tp_pct / 100.0
-        return float(phase.take_profit)
+        entry_credit = self._current_entry_price()
+        if entry_credit is not None:
+            return entry_credit * self.contract_multiplier * phase.take_profit_pct / 100.0
+        return None
 
     def _effective_stop_loss_usd(self, phase: TradingPhase | None) -> float | None:
         if phase is None:
             return None
-        if self.sl_pct is not None:
-            entry_credit = self._current_entry_price()
-            if entry_credit is not None:
-                base_sl = -(entry_credit * self.contract_multiplier * self.sl_pct / 100.0)
-            else:
-                base_sl = float(phase.stop_loss)
+        entry_credit = self._current_entry_price()
+        if entry_credit is not None:
+            sl_from_pct = -(entry_credit * self.contract_multiplier * phase.stop_loss_pct / 100.0)
+            base_sl = max(sl_from_pct, float(phase.stop_loss_max))
         else:
-            base_sl = float(phase.stop_loss)
+            base_sl = float(phase.stop_loss_max)
         if not self.trailing_active or self.trailing_peak_pnl_usd is None:
             return base_sl
         if phase.trail_distance is None:
@@ -511,8 +506,8 @@ class TradingSession:
         for index in range(3):
             phase = self.phases[index] if index < len(self.phases) else None
             phase_number = index + 1
-            snapshot[f"sl_p{phase_number}"] = phase.stop_loss if phase is not None else None
-            snapshot[f"tp_p{phase_number}"] = phase.take_profit if phase is not None else None
+            snapshot[f"sl_p{phase_number}"] = phase.stop_loss_max if phase is not None else None
+            snapshot[f"tp_p{phase_number}"] = phase.take_profit_pct if phase is not None else None
             snapshot[f"act_p{phase_number}"] = phase.activation_profit if phase is not None else None
             snapshot[f"tr_dist_p{phase_number}"] = phase.trail_distance if phase is not None else None
         return snapshot
@@ -675,9 +670,10 @@ class TradingSession:
         return self._structure_exit_debit(("short_put", "long_put"))
 
     def _entry_bracket_from_phase(self, entry_credit: float, phase: TradingPhase) -> BracketSpec:
-        effective_tp = self._effective_take_profit_usd(phase) or phase.take_profit
+        effective_tp = entry_credit * self.contract_multiplier * phase.take_profit_pct / 100.0
         take_profit_price = max(0.0, entry_credit - (effective_tp / self.contract_multiplier))
-        effective_sl = self._effective_stop_loss_usd(phase) or phase.stop_loss
+        sl_from_pct = -(entry_credit * self.contract_multiplier * phase.stop_loss_pct / 100.0)
+        effective_sl = max(sl_from_pct, float(phase.stop_loss_max))
         stop_loss_price = entry_credit + (abs(effective_sl) / self.contract_multiplier)
         return BracketSpec(
             entry_limit_price=entry_credit,
