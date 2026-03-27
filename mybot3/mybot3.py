@@ -1,9 +1,7 @@
 """Entrypoint for the mybot3 pseudocode trading session."""
 
 import argparse
-from dataclasses import dataclass
 import inspect
-from itertools import product
 import socket
 import os
 import sys
@@ -80,25 +78,8 @@ PHASE_3 = {
     "trail_distance": 75,
 }
 
-#SL1_SWEEP_VALUES = [-800, -700, -600, -500, -400]
-#SL2_SWEEP_VALUES = [-800, -700, -600, -500, -400]
-#SL3_SWEEP_VALUES = [-800, -700, -600, -500, -400]
-
-SL1_SWEEP_VALUES = [-500, -400]
-SL2_SWEEP_VALUES = [-400]
-SL3_SWEEP_VALUES = [-400]
-
-
 LOG_LEVEL_CHOICES = ["NOTSET", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 NEW_YORK_TIMEZONE = ZoneInfo("America/New_York")
-
-
-@dataclass(frozen=True)
-class SweepVariant:
-    variant_id: str
-    sl1: float
-    sl2: float
-    sl3: float
 
 
 def available_processed_sources() -> list[str]:
@@ -133,8 +114,6 @@ def validate_processed_args(parser: argparse.ArgumentParser, args: argparse.Name
 
     if any(value is not None for value in processed_location_args + processed_args):
         parser.error("--processed-source, --processed-market-dir, --start-date, and --end-date are only allowed with --processed")
-    if args.sl_sweep:
-        parser.error("--sl-sweep is only allowed with --processed")
     # Timer-based test scenarios are shared by paper/live/processed, but the numeric
     # timer options only make sense when a concrete scenario is selected.
     if any(value is not None for value in timed_args[1:]) and args.test_scenario is None:
@@ -158,18 +137,6 @@ def build_risk_phases(*, sl1: float | None = None, sl2: float | None = None, sl3
         TradingPhase(**phase_1),
         TradingPhase(**phase_2),
         TradingPhase(**phase_3),
-    ]
-
-
-def build_sl_sweep_variants() -> list[SweepVariant]:
-    variants = [
-        (sl1, sl2, sl3)
-        for sl1, sl2, sl3 in product(SL1_SWEEP_VALUES, SL2_SWEEP_VALUES, SL3_SWEEP_VALUES)
-        if sl1 <= sl2 <= sl3
-    ]
-    return [
-        SweepVariant(variant_id=f"v{index:03d}", sl1=sl1, sl2=sl2, sl3=sl3)
-        for index, (sl1, sl2, sl3) in enumerate(variants, start=1)
     ]
 
 
@@ -239,11 +206,6 @@ def _build_run_parser() -> argparse.ArgumentParser:
         "--to-excel-csv",
         action="store_true",
         help="Export run parquet files as Excel-friendly CSV under data/exports/excel with _excel.csv suffix.",
-    )
-    parser.add_argument(
-        "--sl-sweep",
-        action="store_true",
-        help="Run all processed SL sweep variants from mybot3.py constants in a single run.",
     )
     parser.add_argument(
         "--log-level",
@@ -371,8 +333,7 @@ def build_run_id(args: argparse.Namespace) -> str | None:
     start_ymd = args.start_date.strftime("%Y%m%d")
     end_ymd = args.end_date.strftime("%Y%m%d")
     date_suffix = start_ymd if start_ymd == end_ymd else f"{start_ymd}-{end_ymd}"
-    sweep_suffix = "_slsweep" if args.sl_sweep else ""
-    return f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{processed_source_label(args)}_d{date_suffix}{sweep_suffix}"
+    return f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{processed_source_label(args)}_d{date_suffix}"
 
 
 def _normalize_market_timestamp_to_new_york(value: object, *, source_timezone: str | None) -> str | None:
@@ -457,7 +418,6 @@ def main() -> int:
         return 0
 
     mode, broker, output_dir = resolve_runtime(args)
-    sweep_variants = build_sl_sweep_variants() if args.sl_sweep else []
     # Shared calendar instance for both output tagging and entry policy decisions.
     risk_day_manager = RiskDayManager()
     timed_walkthrough_policy = None
@@ -500,12 +460,6 @@ def main() -> int:
             "test_scenario": args.test_scenario,
             "be_after_seconds": args.be_after_seconds,
             "exit_after_seconds": args.exit_after_seconds,
-            "sl_sweep": args.sl_sweep,
-            "sl_sweep_variant_count": len(sweep_variants) if args.sl_sweep else 0,
-            "sl_sweep_variants": [variant.__dict__ for variant in sweep_variants] if args.sl_sweep else None,
-            "sl1_sweep_values": SL1_SWEEP_VALUES if args.sl_sweep else None,
-            "sl2_sweep_values": SL2_SWEEP_VALUES if args.sl_sweep else None,
-            "sl3_sweep_values": SL3_SWEEP_VALUES if args.sl_sweep else None,
             "processed_source": args.processed_source,
             "processed_market_dir": str(args.processed_market_dir) if args.processed_market_dir is not None else None,
             "start_date": args.start_date,
@@ -546,78 +500,65 @@ def main() -> int:
             end_date=args.end_date.isoformat(),
             single_day=args.start_date == args.end_date,
             resolved_days=len(processed_inputs),
-            sl_sweep=args.sl_sweep,
-            variant_count=len(sweep_variants) if args.sl_sweep else 1,
         )
 
     for session_input in resolve_session_inputs(mode, broker):
         trade_date = session_input.trade_date if isinstance(session_input, ProcessedReplayInput) else session_input
         # Resolve the macro calendar once per trade date and reuse it across sweep variants.
         risk_day_status = resolve_risk_day_status(risk_day_manager=risk_day_manager, trade_date=trade_date)
-        variants = sweep_variants or [None]
-        for variant_index, variant in enumerate(variants):
-            # SL sweep reuses the same market day multiple times with different phase stop losses.
-            # In non-sweep runs this stays on the implicit "default" variant.
-            output.set_variant_context(
-                variant_id=variant.variant_id if variant is not None else "default",
-                sl1=variant.sl1 if variant is not None else None,
-                sl2=variant.sl2 if variant is not None else None,
-                sl3=variant.sl3 if variant is not None else None,
-            )
+        output.set_variant_context(
+            variant_id="default",
+            sl1=None,
+            sl2=None,
+            sl3=None,
+        )
+        output.log(
+            "info",
+            "risk day status resolved",
+            trade_date=trade_date.isoformat(),
+            is_risk_day=risk_day_status.is_risk_day,
+            categories=sorted({event.category for event in risk_day_status.events}),
+            trade_on_risk_days=RISK_DAY_POLICY["trade_on_risk_days"],
+        )
+        output.log("info", "starting trading session", trade_date=trade_date.isoformat(), mode=mode)
+        if isinstance(session_input, ProcessedReplayInput):
             output.log(
                 "info",
-                "risk day status resolved",
-                trade_date=trade_date.isoformat(),
-                is_risk_day=risk_day_status.is_risk_day,
-                categories=sorted({event.category for event in risk_day_status.events}),
-                trade_on_risk_days=RISK_DAY_POLICY["trade_on_risk_days"],
-            )
-            output.log("info", "starting trading session", trade_date=trade_date.isoformat(), mode=mode)
-            if isinstance(session_input, ProcessedReplayInput):
-                output.log(
-                    "info",
-                    "processed replay input",
-                    trade_date=session_input.trade_date.isoformat(),
-                    index_file=str(session_input.index_file),
-                    options_file=str(session_input.options_file),
-                )
-
-            trading_session = TradingSession(
-                broker=broker,
-                output=output,
-                trade_date=trade_date,
-                market_start_time=MARKET_START_TIME_LOCAL,
-                market_end_time=MARKET_END_TIME_LOCAL,
-                phases=build_risk_phases(
-                    sl1=variant.sl1 if variant is not None else None,
-                    sl2=variant.sl2 if variant is not None else None,
-                    sl3=variant.sl3 if variant is not None else None,
-                ),
-                timed_walkthrough_policy=timed_walkthrough_policy,
-                risk_day_status=risk_day_status,
-                trade_on_risk_days=bool(RISK_DAY_POLICY["trade_on_risk_days"]),
+                "processed replay input",
+                trade_date=session_input.trade_date.isoformat(),
+                index_file=str(session_input.index_file),
+                options_file=str(session_input.options_file),
             )
 
-            output.log("info", "session initialized", initial_state=trading_session.state, trade_date=trade_date.isoformat())
-            if args.print_config:
-                output.log("info", "risk phases configured", phases=[phase.as_dict() for phase in trading_session.phases])
+        trading_session = TradingSession(
+            broker=broker,
+            output=output,
+            trade_date=trade_date,
+            market_start_time=MARKET_START_TIME_LOCAL,
+            market_end_time=MARKET_END_TIME_LOCAL,
+            phases=build_risk_phases(),
+            timed_walkthrough_policy=timed_walkthrough_policy,
+            risk_day_status=risk_day_status,
+            trade_on_risk_days=bool(RISK_DAY_POLICY["trade_on_risk_days"]),
+        )
 
-            for update in broker.iter_session_updates(trade_date=trade_date):
-                # For SL sweeps we only persist one copy of the replayed market stream.
-                # All later variants consume the same updates again but skip duplicate market writes.
-                if not args.sl_sweep or variant_index == 0:
-                    output.write_market_data(update)
-                trading_session.on_tick(
-                    update.market_snapshot,
-                    update.broker_snapshot,
-                    update.timestamp,
-                )
-            output.log(
-                "info",
-                "runtime note",
-                note="broker session updates were consumed and reconciled",
-                trade_date=trade_date.isoformat(),
+        output.log("info", "session initialized", initial_state=trading_session.state, trade_date=trade_date.isoformat())
+        if args.print_config:
+            output.log("info", "risk phases configured", phases=[phase.as_dict() for phase in trading_session.phases])
+
+        for update in broker.iter_session_updates(trade_date=trade_date):
+            output.write_market_data(update)
+            trading_session.on_tick(
+                update.market_snapshot,
+                update.broker_snapshot,
+                update.timestamp,
             )
+        output.log(
+            "info",
+            "runtime note",
+            note="broker session updates were consumed and reconciled",
+            trade_date=trade_date.isoformat(),
+        )
 
     output.flush()
     output.close()
