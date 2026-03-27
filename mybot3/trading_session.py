@@ -986,12 +986,14 @@ class TradingSession:
             return []
 
         self._evaluate_market_start_entry_gate(now)
-        if self._local_hhmm(now) < self.entry_gate_start_time:
+        if not self.entry_gate_disabled and self._local_hhmm(now) < self.entry_gate_start_time:
             return []
         if self.entry_blocked_for_day:
             return []
 
-        if not self._is_in_market_window(now) or not self._has_complete_quotes():
+        if not self._has_complete_quotes():
+            return []
+        if not self.entry_gate_disabled and not self._is_in_market_window(now):
             return []
         if self.entry_attempted:
             return []
@@ -1002,7 +1004,7 @@ class TradingSession:
             return []
 
         entry_credit_usd = entry_credit * self.contract_multiplier
-        if entry_credit_usd < self.entry_gate_min_credit:
+        if not self.entry_gate_disabled and entry_credit_usd < self.entry_gate_min_credit:
             # Credit insufficient: entry gate must fully evaluate before allowing entry attempts.
             # The gate evaluation (in _evaluate_market_start_entry_gate) will decide if we're
             # still within the grace period (waiting for credit to improve) or past it (blocked for day).
