@@ -420,9 +420,6 @@ def main() -> int:
 
     for session_input in resolve_session_inputs(mode, broker):
         trade_date = session_input.trade_date if isinstance(session_input, ProcessedReplayInput) else session_input
-        output.set_variant_context(
-            variant_id="default",
-        )
         output.log("info", "starting trading session", trade_date=trade_date.isoformat(), mode=mode)
         if isinstance(session_input, ProcessedReplayInput):
             output.log(

@@ -36,7 +36,6 @@ DAILY_DETAIL_COLUMNS = [
     # Session
     "ts",          # Tick timestamp in UTC.
     "date",        # Trading date for the session.
-    "variant_id",  # Stable identifier for the sweep variant.
     "und_px",      # Underlying index price.
     "state",       # Session state after this tick.
     "struct",      # Active structure name.
@@ -96,7 +95,6 @@ DAILY_DETAIL_COLUMNS = [
 DAILY_SUMMARY_COLUMNS = [
     # Day summary
     "date",        # Trading date for the day summary.
-    "variant_id",  # Stable identifier for the sweep variant.
     "wd",          # Weekday name.
     "ent_ts",      # First detected entry timestamp.
     "ex_ts",       # Final detected exit timestamp.
@@ -137,7 +135,6 @@ DAILY_SUMMARY_COLUMNS = [
 RUN_SUMMARY_COLUMNS = [
     # Dimensions
     "run_id",            # Run identifier.
-    "variant_id",        # Stable identifier for the sweep variant.
     "validity_bucket",   # valid_only | all_days.
 
     # Sample size
@@ -477,22 +474,10 @@ class TradingRunOutput:
         self._seen_fill_keys: set[tuple[Any, ...]] = set()
         self._seen_order_status_keys: set[tuple[Any, ...]] = set()
         self._trade_journal_seq = 0
-        self._variant_context: dict[str, str | float | None] = {
-            "variant_id": "default",
-        }
 
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self._log_handle = self.log_file.open("a", encoding="utf-8")
         self._trade_journal_handle = self.trade_journal_file.open("a", encoding="utf-8")
-
-    def set_variant_context(
-        self,
-        *,
-        variant_id: str | None = None,
-    ) -> None:
-        self._variant_context = {
-            "variant_id": variant_id or "default",
-        }
 
     def log(self, level: str, message: str, *, timestamp: datetime | None = None, **fields: Any) -> None:
         if not self._should_log(level):
@@ -799,7 +784,6 @@ class TradingRunOutput:
             "seq": self._trade_journal_seq,
             "run_id": self.run_id,
             "trade_date": trade_date,
-            "variant_id": self._current_variant_fields().get("variant_id"),
             "event_type": event_type,
             "trade_id": trade_id,
             "order_id": order_id,
@@ -987,7 +971,7 @@ class TradingRunOutput:
         gross_value = (fill_price_value or 0.0) * quantity_value * multiplier_value
 
         stats = self._instrument_fill_stats.setdefault(
-            (*self._variant_key_from_mapping(self._current_variant_fields()), instrument),
+            instrument,
             {
                 "instrument": instrument,
                 "trade_date": self._normalize_trade_date_key(
@@ -1034,67 +1018,53 @@ class TradingRunOutput:
         return "\n".join(sections)
 
     def _render_daily_result_sections(self) -> list[str]:
-        grouped_actions: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        grouped_fill_stats: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
-        grouped_trade_journal: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        grouped_actions: dict[str, list[dict[str, Any]]] = {}
+        grouped_fill_stats: dict[str, dict[str, dict[str, Any]]] = {}
+        grouped_trade_journal: dict[str, list[dict[str, Any]]] = {}
 
         for action in self._session_actions:
             trade_date = self._action_trade_date(action)
-            variant_key = self._variant_key_from_mapping(action.get("fields", {}) or {})
-            grouped_actions.setdefault((trade_date, *variant_key), []).append(action)
+            grouped_actions.setdefault(trade_date, []).append(action)
 
         for instrument_key, stats in self._instrument_fill_stats.items():
             trade_date = self._instrument_trade_date(stats)
-            grouped_fill_stats.setdefault(
-                (trade_date, str(stats.get("variant_id") or "default")),
-                {},
-            )[str(stats.get("instrument") or instrument_key[-1])] = stats
+            grouped_fill_stats.setdefault(trade_date, {})[str(stats.get("instrument") or instrument_key)] = stats
 
         for row in self._trade_journal_rows:
             trade_date = self._normalize_trade_date_key(row.get("trade_date") or datetime.now().date().isoformat())
-            grouped_trade_journal.setdefault(
-                (trade_date, str(row.get("variant_id") or "default")),
-                [],
-            ).append(row)
+            grouped_trade_journal.setdefault(trade_date, []).append(row)
 
         detail_section_keys = {
-            (
-                self._normalize_trade_date_key(row.get("date") or datetime.now().date().isoformat()),
-                *self._variant_key_from_mapping(row),
-            )
+            self._normalize_trade_date_key(row.get("date") or datetime.now().date().isoformat())
             for row in self._daily_detail_rows
         }
 
         all_section_keys = sorted(
             set(grouped_actions) | set(grouped_fill_stats) | set(grouped_trade_journal) | detail_section_keys,
-            key=lambda item: (item[0], str(item[1])),
         )
         if not all_section_keys:
             today = datetime.now().date().isoformat()
-            all_section_keys = [(today, "default")]
+            all_section_keys = [today]
 
         return [
             self._render_trading_session_summary(
                 trade_date=trade_date,
-                variant_id=variant_id,
-                actions=grouped_actions.get((trade_date, variant_id), []),
-                fill_stats=grouped_fill_stats.get((trade_date, variant_id), {}),
-                trade_journal_rows=grouped_trade_journal.get((trade_date, variant_id), []),
+                actions=grouped_actions.get(trade_date, []),
+                fill_stats=grouped_fill_stats.get(trade_date, {}),
+                trade_journal_rows=grouped_trade_journal.get(trade_date, []),
             )
-            for trade_date, variant_id in all_section_keys
+            for trade_date in all_section_keys
         ]
 
     def _render_trading_session_summary(
         self,
         *,
         trade_date: str,
-        variant_id: str,
         actions: list[dict[str, Any]],
         fill_stats: dict[str, dict[str, Any]],
         trade_journal_rows: list[dict[str, Any]],
     ) -> str:
         lines = [
-            f"Variant: {self._variant_label(variant_id=variant_id)}",
             f"Trade date: {trade_date}",
             f"Run log: {self.log_file}",
             "",
@@ -1264,18 +1234,14 @@ class TradingRunOutput:
         if not self._daily_detail_rows:
             return []
 
-        grouped_rows: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        grouped_rows: dict[str, list[dict[str, Any]]] = {}
         for row in self._daily_detail_rows:
             trade_date = self._normalize_trade_date_key(row.get("date") or datetime.now().date().isoformat())
-            variant_key = self._variant_key_from_mapping(row)
-            grouped_rows.setdefault((trade_date, *variant_key), []).append(row)
+            grouped_rows.setdefault(trade_date, []).append(row)
 
         return [
             self._build_daily_summary_row(trade_date, rows)
-            for (trade_date, _), rows in sorted(
-                grouped_rows.items(),
-                key=lambda item: (item[0][0], str(item[0][1])),
-            )
+            for trade_date, rows in sorted(grouped_rows.items())
         ]
 
     def _render_run_summary_rows(self) -> list[dict[str, Any]]:
@@ -1285,20 +1251,18 @@ class TradingRunOutput:
 
         summary_frame = pd.DataFrame(daily_summary_rows, columns=DAILY_SUMMARY_COLUMNS)
         rendered_rows: list[dict[str, Any]] = []
-        variant_groups = summary_frame.groupby(["variant_id"], dropna=False, sort=True)
-        for _, variant_frame in variant_groups:
-            for validity_bucket in ("valid_only", "all_days"):
-                scoped_frame = variant_frame
-                if validity_bucket == "valid_only":
-                    scoped_frame = variant_frame[variant_frame["valid"] == True]
-                if scoped_frame.empty:
-                    continue
-                rendered_rows.append(
-                    self._build_run_summary_row(
-                        scoped_frame.copy(),
-                        validity_bucket=validity_bucket,
-                    )
+        for validity_bucket in ("valid_only", "all_days"):
+            scoped_frame = summary_frame
+            if validity_bucket == "valid_only":
+                scoped_frame = summary_frame[summary_frame["valid"] == True]
+            if scoped_frame.empty:
+                continue
+            rendered_rows.append(
+                self._build_run_summary_row(
+                    scoped_frame.copy(),
+                    validity_bucket=validity_bucket,
                 )
+            )
         return rendered_rows
 
     def _build_daily_summary_row(self, trade_date: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1346,7 +1310,6 @@ class TradingRunOutput:
         summary = {
             # Day summary
             "date": trade_date,
-            "variant_id": last_non_null("variant_id") or "default",
             "wd": self._weekday_name(trade_date),
             "ent_ts": entry_time,
             "ex_ts": exit_time,
@@ -1506,7 +1469,6 @@ class TradingRunOutput:
 
         return {
             "run_id": self.run_id,
-            "variant_id": self._series_first(summary_frame["variant_id"]) or "default",
             "validity_bucket": validity_bucket,
             "num_days": num_days,
             "win_days": win_days,
@@ -1549,7 +1511,6 @@ class TradingRunOutput:
 
         summary_rows = [
             {
-                "variant_id": str(row.get("variant_id") or "default"),
                 "scope": row['validity_bucket'],
                 "days": self._format_summary_metric_value(row.get("num_days")),
                 "total_pnl": self._format_summary_metric_value(row.get("total_pnl")),
@@ -1566,7 +1527,6 @@ class TradingRunOutput:
         ]
         return self._render_text_table(
             columns=[
-                "variant_id",
                 "scope",
                 "days",
                 "total_pnl",
@@ -1718,21 +1678,7 @@ class TradingRunOutput:
         return datetime.now().date().isoformat()
 
     def _contextualize_fields(self, fields: dict[str, Any]) -> dict[str, Any]:
-        contextualized = dict(fields)
-        for key, value in self._current_variant_fields().items():
-            contextualized.setdefault(key, value)
-        return contextualized
-
-    def _current_variant_fields(self) -> dict[str, str | float | None]:
-        return dict(self._variant_context)
-
-    def _variant_key_from_mapping(self, mapping: dict[str, Any]) -> tuple[str]:
-        return (
-            str(mapping.get("variant_id") or "default"),
-        )
-
-    def _variant_label(self, *, variant_id: str) -> str:
-        return variant_id
+        return dict(fields)
 
     def _render_action_detail(self, fields: dict[str, Any]) -> str:
         if not fields:
