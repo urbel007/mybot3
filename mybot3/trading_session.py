@@ -85,6 +85,10 @@ class TradingSession:
         min_entry_credit: float = 5.0,
         quantity: int = 1,
         contract_multiplier: int = 100,
+        entry_gate_disabled: bool = False,
+        entry_gate_start_time: str | None = None,
+        entry_gate_min_credit: float | None = None,
+        entry_gate_time_tolerance_seconds: float = 0.0,
         timed_walkthrough_policy: TimedWalkthroughPolicy | None = None,
     ):
         self.state = "FLAT"
@@ -100,6 +104,10 @@ class TradingSession:
         self.min_entry_credit = float(min_entry_credit)
         self.quantity = int(quantity)
         self.contract_multiplier = int(contract_multiplier)
+        self.entry_gate_disabled = bool(entry_gate_disabled)
+        self.entry_gate_start_time = str(entry_gate_start_time or market_start_time)
+        self.entry_gate_min_credit = float(entry_gate_min_credit) if entry_gate_min_credit is not None else float(min_entry_credit)
+        self.entry_gate_time_tolerance_seconds = max(0.0, float(entry_gate_time_tolerance_seconds))
         self.timed_walkthrough_policy = timed_walkthrough_policy
         self.exchange_timezone = ZoneInfo("America/New_York")
 
@@ -112,6 +120,9 @@ class TradingSession:
         self.last_open_orders: list[BrokerOrderStatus] = []
         self.last_positions: list[BrokerPosition] = []
         self.entry_attempted = False
+        self.entry_blocked_for_day = False
+        self.entry_start_gate_checked = False
+        self.entry_gate_first_check_at: datetime | None = None
         self.realized_pnl_usd = 0.0
         self.exit_reason: str | None = None
         self.trade_sequence = 0
@@ -133,6 +144,9 @@ class TradingSession:
             trade_date=self.trade_date.isoformat(),
             market_start=self.market_start_time,
             market_end=self.market_end_time,
+            entry_gate_start=self.entry_gate_start_time,
+            entry_gate_min_credit=self.entry_gate_min_credit,
+            entry_gate_time_tolerance_seconds=self.entry_gate_time_tolerance_seconds,
             timed_walkthrough=bool(self.timed_walkthrough_policy is not None),
         )
 
@@ -874,8 +888,105 @@ class TradingSession:
     def _nearest_5_strike(price: float) -> float:
         return round(price / 5.0) * 5.0
 
+    def _evaluate_market_start_entry_gate(self, now: datetime) -> None:
+        """Evaluate one-time entry gate at session start time.
+        
+        If entry gate is disabled (--no-entry-gate), skip all checks.
+        Otherwise, check if minimum credit is available after the configured grace period.
+        Once passed or blocked for the day, no further evaluation occurs.
+        """
+        if self.entry_gate_disabled:
+            self.entry_start_gate_checked = True
+            return
+        if self.entry_start_gate_checked:
+            return
+        if self._local_hhmm(now) < self.entry_gate_start_time:
+            return
+
+        if self.entry_gate_first_check_at is None:
+            self.entry_gate_first_check_at = now
+        
+        gate_elapsed_seconds = max(0.0, (now - self.entry_gate_first_check_at).total_seconds())
+        gate_timeout_reached = gate_elapsed_seconds >= self.entry_gate_time_tolerance_seconds
+
+        # Check 1: Are quotes available?
+        if not self._has_complete_quotes():
+            if not gate_timeout_reached:
+                # Within grace period: wait for quotes to arrive
+                return
+            # Timeout reached: block day if quotes still unavailable
+            self.entry_start_gate_checked = True
+            self.entry_blocked_for_day = True
+            self.output.log(
+                "info",
+                "entry disabled for day",
+                reason="start-time gate could not be evaluated without complete quotes",
+                gate_start=self.entry_gate_start_time,
+                gate_elapsed_seconds=round(gate_elapsed_seconds, 2),
+                entry_gate_time_tolerance_seconds=self.entry_gate_time_tolerance_seconds,
+            )
+            return
+
+        # Check 2: Can we calculate entry credit?
+        entry_credit = self._iron_fly_entry_credit()
+        if entry_credit is None:
+            if not gate_timeout_reached:
+                # Within grace period: wait for credit calculation
+                return
+            # Timeout reached: block day if credit cannot be calculated
+            self.entry_start_gate_checked = True
+            self.entry_blocked_for_day = True
+            self.output.log(
+                "info",
+                "entry disabled for day",
+                reason="start-time entry credit unavailable",
+                gate_start=self.entry_gate_start_time,
+                gate_elapsed_seconds=round(gate_elapsed_seconds, 2),
+                entry_gate_time_tolerance_seconds=self.entry_gate_time_tolerance_seconds,
+            )
+            return
+
+        # Check 3: Is credit sufficient?
+        entry_credit_usd = entry_credit * self.contract_multiplier
+        if entry_credit_usd < self.entry_gate_min_credit:
+            if not gate_timeout_reached:
+                # Within grace period: wait for credit to improve
+                return
+            # Timeout reached: block day if credit still insufficient
+            self.entry_start_gate_checked = True
+            self.entry_blocked_for_day = True
+            self.output.log(
+                "info",
+                "entry disabled for day",
+                reason="start-time minimum entry credit not met",
+                gate_start=self.entry_gate_start_time,
+                entry_credit_usd=round(entry_credit_usd, 2),
+                min_entry_credit=self.entry_gate_min_credit,
+                gate_elapsed_seconds=round(gate_elapsed_seconds, 2),
+                entry_gate_time_tolerance_seconds=self.entry_gate_time_tolerance_seconds,
+            )
+            return
+
+        # All checks passed: entry gate is satisfied, trading can begin
+        self.entry_start_gate_checked = True
+        self.output.log(
+            "debug",
+            "entry gate passed at market start",
+            gate_start=self.entry_gate_start_time,
+            entry_credit_usd=round(entry_credit_usd, 2),
+            min_entry_credit=self.entry_gate_min_credit,
+            gate_elapsed_seconds=round(gate_elapsed_seconds, 2),
+            entry_gate_time_tolerance_seconds=self.entry_gate_time_tolerance_seconds,
+        )
+
     def handle_flat(self, market_snapshot, now):
         if self._tick_transition_event == "entry_rejected":
+            return []
+
+        self._evaluate_market_start_entry_gate(now)
+        if self._local_hhmm(now) < self.entry_gate_start_time:
+            return []
+        if self.entry_blocked_for_day:
             return []
 
         if not self._is_in_market_window(now) or not self._has_complete_quotes():
@@ -889,12 +1000,13 @@ class TradingSession:
             return []
 
         entry_credit_usd = entry_credit * self.contract_multiplier
-        if entry_credit_usd < self.min_entry_credit:
+        if entry_credit_usd < self.entry_gate_min_credit:
             self.output.log(
                 "info",
                 "entry skipped, credit below minimum",
                 entry_credit_usd=round(entry_credit_usd, 2),
-                min_entry_credit=self.min_entry_credit,
+                min_entry_credit=self.entry_gate_min_credit,
+                entry_gate_time_tolerance_seconds=self.entry_gate_time_tolerance_seconds,
             )
             return []
 

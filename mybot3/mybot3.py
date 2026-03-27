@@ -26,8 +26,8 @@ IBKR_DEFAULT_CLIENT_ID = 101
 # - strategies.mybot_sltp.market_start_time / market_end_time
 # - risk_policies.3phases_12_14-30_mybot
 # - analysis.valid_day
-MARKET_START_TIME_LOCAL = "11:45"
-MARKET_END_TIME_LOCAL = "15:45"
+SESSION_START_TIME_LOCAL = "11:45"
+SESSION_END_TIME_LOCAL = "15:45"
 
 VALID_DAY_POLICY = {
     # Replay-quality gate for daily/run summaries.
@@ -39,9 +39,10 @@ VALID_DAY_POLICY = {
 
 TAKE_PROFIT_PCT = 15
 STOP_LOSS_PCT = 70
-STOP_LOSS_MAX = -800
+STOP_LOSS_MAX = -1000
 WINGSIZE = 15
 MIN_ENTRY_CREDIT = 1175
+ENTRY_GATE_TIME_TOLERANCE_SECONDS = 60
 QUANTITY = 1
 CONTRACT_MULTIPLIER = 100
 
@@ -58,6 +59,14 @@ def parse_iso_date(value: str) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"Invalid date '{value}'. Use YYYY-MM-DD.") from exc
+
+
+def parse_local_hhmm(value: str) -> str:
+    try:
+        parsed = datetime.strptime(str(value), "%H:%M")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"Invalid time '{value}'. Use HH:MM (24h).") from exc
+    return parsed.strftime("%H:%M")
 
 
 def validate_processed_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -81,6 +90,12 @@ def validate_processed_args(parser: argparse.ArgumentParser, args: argparse.Name
 
     if any(value is not None for value in processed_location_args + processed_args):
         parser.error("--processed-source, --processed-market-dir, --start-date, and --end-date are only allowed with --processed")
+    if float(args.entry_gate_time_tolerance_seconds) < 0:
+        parser.error("--entry-gate-time-tolerance-seconds must be greater than or equal to zero")
+    if float(args.entry_gate_min_credit_usd) < 0:
+        parser.error("--entry-gate-min-credit-usd must be greater than or equal to zero")
+    if str(args.entry_gate_start_time_local) > str(SESSION_END_TIME_LOCAL):
+        parser.error("--entry-gate-start-time-local must be less than or equal to the configured session end time")
     # Timer-based test scenarios are shared by paper/live/processed, but the numeric
     # timer options only make sense when a concrete scenario is selected.
     if any(value is not None for value in timed_args[1:]) and args.test_scenario is None:
@@ -143,6 +158,8 @@ def _build_run_parser() -> argparse.ArgumentParser:
     # - python -m mybot3.mybot3 --processed --processed-source databento --start-date 2025-10-16 --end-date 2025-10-16
     # - python -m mybot3.mybot3 --processed --processed-source databento --test-scenario timed-walkthrough --be-after-seconds 15 --exit-after-seconds 30 --start-date 2025-10-16 --end-date 2025-10-16
     # - python -m mybot3.mybot3 --paper --test-scenario timed-walkthrough --be-after-seconds 60 --exit-after-seconds 120
+    # - python -m mybot3.mybot3 --paper --write-market --to-excel-csv
+    # - python -m mybot3.mybot3 --paper --entry-gate-start-time-local 12:30 --entry-gate-min-credit-usd 1050 --entry-gate-time-tolerance-seconds 300
     parser = argparse.ArgumentParser(description="Run the mybot3 pseudocode state machine entrypoint.")
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument("--live", action="store_true", help="Run mybot3 in live mode with the IBKR live port.")
@@ -183,6 +200,29 @@ def _build_run_parser() -> argparse.ArgumentParser:
         "--exit-after-seconds",
         type=float,
         help="Seconds after break-even fill before timed-walkthrough submits the final exit order.",
+    )
+    parser.add_argument(
+        "--entry-gate-start-time-local",
+        type=parse_local_hhmm,
+        default=SESSION_START_TIME_LOCAL,
+        help="One-time entry gate time in HH:MM local exchange time; before this time no entries are allowed.",
+    )
+    parser.add_argument(
+        "--entry-gate-min-credit-usd",
+        type=float,
+        default=float(MIN_ENTRY_CREDIT),
+        help="Minimum credit in USD used by the one-time entry gate and entry checks.",
+    )
+    parser.add_argument(
+        "--entry-gate-time-tolerance-seconds",
+        type=float,
+        default=float(ENTRY_GATE_TIME_TOLERANCE_SECONDS),
+        help="Grace period in seconds after --entry-gate-start-time-local before a no-trade day is enforced.",
+    )
+    parser.add_argument(
+        "--no-entry-gate",
+        action="store_true",
+        help="Disable the entry gate entirely; disregards time, credit, and tolerance checks and allows immediate entry.",
     )
     parser.add_argument(
         "--processed-source",
@@ -374,6 +414,10 @@ def main() -> int:
             "log_level": args.log_level,
             "write_market": args.write_market,
             "valid_day_policy": VALID_DAY_POLICY,
+            "entry_gate_disabled": args.no_entry_gate,
+            "entry_gate_start_time_local": args.entry_gate_start_time_local,
+            "entry_gate_min_credit_usd": args.entry_gate_min_credit_usd,
+            "entry_gate_time_tolerance_seconds": args.entry_gate_time_tolerance_seconds,
             "test_scenario": args.test_scenario,
             "be_after_seconds": args.be_after_seconds,
             "exit_after_seconds": args.exit_after_seconds,
@@ -388,7 +432,15 @@ def main() -> int:
     )
 
     output.log("info", "mybot3 pseudocode entrypoint", run_id=output.run_id, mode=mode, output_dir=str(output.run_dir))
-    output.log("info", "market window configured", market_start=MARKET_START_TIME_LOCAL, market_end=MARKET_END_TIME_LOCAL)
+    output.log("info", "session window configured", session_start=SESSION_START_TIME_LOCAL, session_end=SESSION_END_TIME_LOCAL)
+    output.log(
+        "info",
+        "entry gate configured",
+        entry_gate_disabled=args.no_entry_gate,
+        entry_gate_start_time_local=args.entry_gate_start_time_local if not args.no_entry_gate else "N/A",
+        entry_gate_min_credit_usd=args.entry_gate_min_credit_usd if not args.no_entry_gate else "N/A",
+        entry_gate_time_tolerance_seconds=args.entry_gate_time_tolerance_seconds if not args.no_entry_gate else "N/A",
+    )
     output.log("info", "valid day policy configured", **VALID_DAY_POLICY)
     if timed_walkthrough_policy is not None:
         output.log(
@@ -434,8 +486,8 @@ def main() -> int:
             broker=broker,
             output=output,
             trade_date=trade_date,
-            market_start_time=MARKET_START_TIME_LOCAL,
-            market_end_time=MARKET_END_TIME_LOCAL,
+            market_start_time=SESSION_START_TIME_LOCAL,
+            market_end_time=SESSION_END_TIME_LOCAL,
             take_profit_pct=TAKE_PROFIT_PCT,
             stop_loss_pct=STOP_LOSS_PCT,
             stop_loss_max=STOP_LOSS_MAX,
@@ -443,6 +495,10 @@ def main() -> int:
             min_entry_credit=MIN_ENTRY_CREDIT,
             quantity=QUANTITY,
             contract_multiplier=CONTRACT_MULTIPLIER,
+            entry_gate_disabled=args.no_entry_gate,
+            entry_gate_start_time=args.entry_gate_start_time_local,
+            entry_gate_min_credit=args.entry_gate_min_credit_usd,
+            entry_gate_time_tolerance_seconds=args.entry_gate_time_tolerance_seconds,
             timed_walkthrough_policy=timed_walkthrough_policy,
         )
 
