@@ -332,7 +332,6 @@ class TradingSession:
             total_pnl = realized_pnl + unrealized_pnl
         quality_counts = self._market_quality_counts(market_snapshot)
         metadata = getattr(market_snapshot, "metadata", {}) or {}
-        phase_settings = self._phase_settings_snapshot()
         be_lo, be_hi = self._current_break_even_bounds()
         leg_metrics = self._tick_leg_metrics()
         self.output.record_daily_detail(
@@ -362,9 +361,6 @@ class TradingSession:
                 q_ffill=quality_counts["ffill"],
                 q_untrust=quality_counts["untrusted"],
                 q_miss=quality_counts["missing"],
-                sl_p1=phase_settings["sl_p1"],
-                tp_p1=phase_settings["tp_p1"],
-
                 note=self._tick_note(broker_snapshot),
                 mark_pts=self._current_mark_price(),
                 be_lo=be_lo,
@@ -448,12 +444,6 @@ class TradingSession:
         if raw_value is not None:
             return float(raw_value)
         return None
-
-    def _phase_settings_snapshot(self) -> dict[str, float | None]:
-        return {
-            "sl_p1": self.stop_loss_max,
-            "tp_p1": self.take_profit_pct,
-        }
 
     def _market_quality_counts(self, market_snapshot) -> dict[str, int]:
         counts = {
@@ -808,6 +798,9 @@ class TradingSession:
         return f"{self.trade_date.strftime('%Y%m%d')}_trade_{self.trade_sequence:04d}"
 
     def _ensure_structure_from_snapshot(self, market_snapshot) -> None:
+        if self.state == "DONE":
+            return
+
         if self.active_structure is not None:
             self.broker.ensure_structure_market_data(self.active_structure.request)
             return

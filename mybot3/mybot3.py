@@ -457,6 +457,15 @@ def main() -> int:
                 update.broker_snapshot,
                 update.timestamp,
             )
+            if trading_session.state == "DONE":
+                output.log(
+                    "info",
+                    "session completed",
+                    trade_date=trade_date.isoformat(),
+                    final_state=trading_session.state,
+                    reason="terminal state reached",
+                )
+                break
         output.log(
             "info",
             "runtime note",
