@@ -142,6 +142,7 @@ def resolve_runtime(args: argparse.Namespace) -> tuple[str, object, Path]:
         processed_root=PROCESSED_ROOT,
         start_date=args.start_date,
         end_date=args.end_date,
+        skip_missing=args.skip_missing_dates,
     ), PROJECT_ROOT / "data" / "backtests" / "replay" / "mybot3"
 
 
@@ -250,6 +251,11 @@ def _build_run_parser() -> argparse.ArgumentParser:
         type=parse_iso_date,
         help="Processed replay end date in YYYY-MM-DD. If equal to --start-date, only one day is used.",
     )
+    parser.add_argument(
+        "--skip-missing-dates",
+        action="store_true",
+        help="Skip dates where no processed files are found instead of aborting the run.",
+    )
     return parser
 
 
@@ -283,6 +289,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                     source=args.processed_source,
                     start_date=args.start_date,
                     end_date=args.end_date,
+                    skip_missing=args.skip_missing_dates,
                 )
         except ValueError as exc:
             parser.error(str(exc))

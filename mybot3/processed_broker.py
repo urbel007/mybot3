@@ -87,12 +87,14 @@ class ProcessedBroker(MyBot3BrokerProtocol):
         start_date: date,
         end_date: date,
         fill_model: str = "midpoint",
+        skip_missing: bool = False,
     ) -> "ProcessedBroker":
         replay_inputs = cls.resolve_replay_inputs(
             processed_root=processed_root,
             source=source,
             start_date=start_date,
             end_date=end_date,
+            skip_missing=skip_missing,
         )
         return cls(source=source, fill_model=fill_model, replay_inputs=replay_inputs)
 
@@ -121,11 +123,17 @@ class ProcessedBroker(MyBot3BrokerProtocol):
         source: str,
         start_date: date,
         end_date: date,
+        skip_missing: bool = False,
     ) -> list[ProcessedReplayInput]:
         resolved_inputs: list[ProcessedReplayInput] = []
         for trade_date in cls._iter_trade_dates(start_date, end_date):
-            index_file = cls._resolve_processed_file(processed_root, source=source, kind="index", trade_date=trade_date)
-            options_file = cls._resolve_processed_file(processed_root, source=source, kind="options", trade_date=trade_date)
+            try:
+                index_file = cls._resolve_processed_file(processed_root, source=source, kind="index", trade_date=trade_date)
+                options_file = cls._resolve_processed_file(processed_root, source=source, kind="options", trade_date=trade_date)
+            except ValueError:
+                if skip_missing:
+                    continue
+                raise
             resolved_inputs.append(
                 ProcessedReplayInput(
                     trade_date=trade_date,
