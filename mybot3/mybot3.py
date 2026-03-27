@@ -37,37 +37,13 @@ VALID_DAY_POLICY = {
     "pct_trusted_rows_in_window": 80.0,
 }
 
-ZONE_TIMES_LOCAL = ["12:00", "14:30"]
-
 PHASE_1 = {
     "name": "phase_1",
     "window_start": MARKET_START_TIME_LOCAL,
-    "window_end": ZONE_TIMES_LOCAL[0],
+    "window_end": MARKET_END_TIME_LOCAL,
     "take_profit_pct": 25,
     "stop_loss_pct": 37,
     "stop_loss_max": -600,
-    "activation_profit": None,
-    "trail_distance": None,
-}
-
-PHASE_2 = {
-    "name": "phase_2",
-    "window_start": ZONE_TIMES_LOCAL[0],
-    "window_end": ZONE_TIMES_LOCAL[1],
-    "take_profit_pct": 19,
-    "stop_loss_pct": 37,
-    "stop_loss_max": -600,
-    "activation_profit": None,
-    "trail_distance": None,
-}
-
-PHASE_3 = {
-    "name": "phase_3",
-    "window_start": ZONE_TIMES_LOCAL[1],
-    "window_end": MARKET_END_TIME_LOCAL,
-    "take_profit_pct": 19,
-    "stop_loss_pct": 31,
-    "stop_loss_max": -500,
     "activation_profit": None,
     "trail_distance": None,
 }
@@ -124,14 +100,7 @@ def validate_processed_args(parser: argparse.ArgumentParser, args: argparse.Name
 
 
 def build_risk_phases() -> list[TradingPhase]:
-    phase_1 = {**PHASE_1}
-    phase_2 = {**PHASE_2}
-    phase_3 = {**PHASE_3}
-    return [
-        TradingPhase(**phase_1),
-        TradingPhase(**phase_2),
-        TradingPhase(**phase_3),
-    ]
+    return [TradingPhase(**PHASE_1)]
 
 
 def processed_source_label(args: argparse.Namespace) -> str:

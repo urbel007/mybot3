@@ -134,8 +134,6 @@ class TradingSession:
         self._tick_transition_reason: str | None = None
         self.trailing_active = False
         self.trailing_peak_pnl_usd: float | None = None
-        self.trail_on_p2: bool | None = None
-        self.trail_on_p3: bool | None = None
         self.break_even_center_strike: float | None = None
         self.break_even_entry_credit: float | None = None
         self.entry_fill_confirmed_at: datetime | None = None
@@ -398,16 +396,6 @@ class TradingSession:
                 tp_p1=phase_settings["tp_p1"],
                 act_p1=phase_settings["act_p1"],
                 tr_dist_p1=phase_settings["tr_dist_p1"],
-                sl_p2=phase_settings["sl_p2"],
-                tp_p2=phase_settings["tp_p2"],
-                tr_on_p2=self.trail_on_p2,
-                act_p2=phase_settings["act_p2"],
-                tr_dist_p2=phase_settings["tr_dist_p2"],
-                sl_p3=phase_settings["sl_p3"],
-                tp_p3=phase_settings["tp_p3"],
-                tr_on_p3=self.trail_on_p3,
-                act_p3=phase_settings["act_p3"],
-                tr_dist_p3=phase_settings["tr_dist_p3"],
                 note=self._tick_note(broker_snapshot),
                 mark_pts=self._current_mark_price(),
                 be_lo=be_lo,
@@ -502,22 +490,15 @@ class TradingSession:
         return None
 
     def _phase_settings_snapshot(self) -> dict[str, float | None]:
-        snapshot: dict[str, float | None] = {}
-        for index in range(3):
-            phase = self.phases[index] if index < len(self.phases) else None
-            phase_number = index + 1
-            snapshot[f"sl_p{phase_number}"] = phase.stop_loss_max if phase is not None else None
-            snapshot[f"tp_p{phase_number}"] = phase.take_profit_pct if phase is not None else None
-            snapshot[f"act_p{phase_number}"] = phase.activation_profit if phase is not None else None
-            snapshot[f"tr_dist_p{phase_number}"] = phase.trail_distance if phase is not None else None
-        return snapshot
+        phase = self.phases[0] if self.phases else None
+        return {
+            "sl_p1": phase.stop_loss_max if phase is not None else None,
+            "tp_p1": phase.take_profit_pct if phase is not None else None,
+            "act_p1": phase.activation_profit if phase is not None else None,
+            "tr_dist_p1": phase.trail_distance if phase is not None else None,
+        }
 
     def _update_trailing_phase_snapshots(self, *, phase: TradingPhase | None, total_pnl: float | None) -> None:
-        phase_number = self._phase_number(phase)
-        if phase_number == 2 and self.trail_on_p2 is None:
-            self.trail_on_p2 = self.trailing_active
-        if phase_number == 3 and self.trail_on_p3 is None:
-            self.trail_on_p3 = self.trailing_active
         if phase is None or total_pnl is None:
             return
         if phase.activation_profit is None or phase.trail_distance is None:

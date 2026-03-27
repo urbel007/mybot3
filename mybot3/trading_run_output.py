@@ -68,20 +68,6 @@ DAILY_DETAIL_COLUMNS = [
     "act_p1",      # Phase 1 trailing activation in USD.
     "tr_dist_p1",  # Phase 1 trailing distance in USD.
 
-    # Phase 2
-    "sl_p2",       # Phase 2 stop loss max in USD.
-    "tp_p2",       # Phase 2 take profit in pct.
-    "tr_on_p2",    # Trailing already active when phase 2 started.
-    "act_p2",      # Phase 2 trailing activation in USD.
-    "tr_dist_p2",  # Phase 2 trailing distance in USD.
-
-    # Phase 3
-    "sl_p3",       # Phase 3 stop loss max in USD.
-    "tp_p3",       # Phase 3 take profit in pct.
-    "tr_on_p3",    # Trailing already active when phase 3 started.
-    "act_p3",      # Phase 3 trailing activation in USD.
-    "tr_dist_p3",  # Phase 3 trailing distance in USD.
-
     # Live runtime snapshot
     "mark_pts",    # Current structure mark in points.
     "be_lo",       # Lower break-even level.
@@ -155,20 +141,6 @@ DAILY_SUMMARY_COLUMNS = [
     "tp_p1",       # Phase 1 take profit in pct.
     "act_p1",      # Phase 1 trailing activation in USD.
     "tr_dist_p1",  # Phase 1 trailing distance in USD.
-
-    # Phase 2
-    "sl_p2",       # Phase 2 stop loss max in USD.
-    "tp_p2",       # Phase 2 take profit in pct.
-    "tr_on_p2",    # Trailing already active when phase 2 started.
-    "act_p2",      # Phase 2 trailing activation in USD.
-    "tr_dist_p2",  # Phase 2 trailing distance in USD.
-
-    # Phase 3
-    "sl_p3",       # Phase 3 stop loss max in USD.
-    "tp_p3",       # Phase 3 take profit in pct.
-    "tr_on_p3",    # Trailing already active when phase 3 started.
-    "act_p3",      # Phase 3 trailing activation in USD.
-    "tr_dist_p3",  # Phase 3 trailing distance in USD.
 ]
 
 
@@ -462,20 +434,6 @@ class DailyDetailRow:
     tp_p1: float | None = None
     act_p1: float | None = None
     tr_dist_p1: float | None = None
-
-    # Phase 2
-    sl_p2: float | None = None
-    tp_p2: float | None = None
-    tr_on_p2: bool | None = None
-    act_p2: float | None = None
-    tr_dist_p2: float | None = None
-
-    # Phase 3
-    sl_p3: float | None = None
-    tp_p3: float | None = None
-    tr_on_p3: bool | None = None
-    act_p3: float | None = None
-    tr_dist_p3: float | None = None
 
     # Live runtime snapshot
     mark_pts: float | None = None
@@ -1461,20 +1419,6 @@ class TradingRunOutput:
             "tp_p1": last_non_null("tp_p1"),
             "act_p1": last_non_null("act_p1"),
             "tr_dist_p1": last_non_null("tr_dist_p1"),
-
-            # Phase 2
-            "sl_p2": last_non_null("sl_p2"),
-            "tp_p2": last_non_null("tp_p2"),
-            "tr_on_p2": last_non_null("tr_on_p2"),
-            "act_p2": last_non_null("act_p2"),
-            "tr_dist_p2": last_non_null("tr_dist_p2"),
-
-            # Phase 3
-            "sl_p3": last_non_null("sl_p3"),
-            "tp_p3": last_non_null("tp_p3"),
-            "tr_on_p3": last_non_null("tr_on_p3"),
-            "act_p3": last_non_null("act_p3"),
-            "tr_dist_p3": last_non_null("tr_dist_p3"),
         }
         return summary
 
