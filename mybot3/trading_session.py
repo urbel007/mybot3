@@ -36,8 +36,8 @@ class TradingPhase:
     window_end: str
     stop_loss: float
     take_profit: float
-    activation_profit: float
-    trail_distance: float
+    activation_profit: float | None = None
+    trail_distance: float | None = None
 
     def as_dict(self) -> dict[str, str | float]:
         return {
@@ -467,6 +467,8 @@ class TradingSession:
             base_sl = float(phase.stop_loss)
         if not self.trailing_active or self.trailing_peak_pnl_usd is None:
             return base_sl
+        if phase.trail_distance is None:
+            return base_sl
         return float(max(base_sl, float(self.trailing_peak_pnl_usd) - float(phase.trail_distance)))
 
     def _tick_leg_metrics(self) -> dict[str, float | None]:
@@ -522,6 +524,8 @@ class TradingSession:
         if phase_number == 3 and self.trail_on_p3 is None:
             self.trail_on_p3 = self.trailing_active
         if phase is None or total_pnl is None:
+            return
+        if phase.activation_profit is None or phase.trail_distance is None:
             return
         if total_pnl >= phase.activation_profit:
             self.trailing_active = True
@@ -1084,7 +1088,7 @@ class TradingSession:
             )
             return []
 
-        if executable_pnl >= phase.activation_profit:
+        if phase.activation_profit is not None and executable_pnl >= phase.activation_profit:
             self._submit_break_even_reduction(
                 market_snapshot=market_snapshot,
                 now=now,

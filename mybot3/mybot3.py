@@ -45,8 +45,8 @@ PHASE_1 = {
     "window_end": ZONE_TIMES_LOCAL[0],
     "stop_loss": -600,
     "take_profit": 400,
-    "activation_profit": 250,
-    "trail_distance": 150,
+    "activation_profit": None,
+    "trail_distance": None,
 }
 
 PHASE_2 = {
@@ -55,8 +55,8 @@ PHASE_2 = {
     "window_end": ZONE_TIMES_LOCAL[1],
     "stop_loss": -600,
     "take_profit": 300,
-    "activation_profit": 200,
-    "trail_distance": 150,
+    "activation_profit": None,
+    "trail_distance": None,
 }
 
 PHASE_3 = {
@@ -65,8 +65,8 @@ PHASE_3 = {
     "window_end": MARKET_END_TIME_LOCAL,
     "stop_loss": -500,
     "take_profit": 300,
-    "activation_profit": 150,
-    "trail_distance": 75,
+    "activation_profit": None,
+    "trail_distance": None,
 }
 
 LOG_LEVEL_CHOICES = ["NOTSET", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
