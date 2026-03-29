@@ -30,3 +30,12 @@ PS C:\Projects\mybot3> .\.venv\Scripts\activate
 
 # Install runtime deps
 pip install -r requirements.txt
+
+### Trade-Mechanik
+
+1. **11:45 ET:** SPX-Kurs ablesen, ATM-Strike bestimmen
+2. **Credit prüfen:** Iron Butterfly (Wing=15) quotieren. Wenn Credit < $1.175 → **kein Trade**
+3. **Einstieg:** Short Call + Short Put (ATM), Long Call (ATM+15), Long Put (ATM-15)
+4. **Limit-Order:** Sofort Closing-Order bei 80% des Credits platzieren (= 20% Profit)
+5. **Stop-Loss:** Wenn Position 50% des Credits verliert → sofort schließen
+6. **15:45 ET:** Falls weder TP noch SL → Position zum Marktpreis schließen

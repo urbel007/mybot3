@@ -158,12 +158,8 @@ RUN_SUMMARY_COLUMNS = [
     "payoff_ratio",      # Mean win / abs(mean loss).
 
     # Exit counts
-    "num_sl1_exit",      # Count of sl1 day exits.
-    "num_sl2_exit",      # Count of sl2 day exits.
-    "num_sl3_exit",      # Count of sl3 day exits.
-    "num_tp1_exit",      # Count of tp1 day exits.
-    "num_tp2_exit",      # Count of tp2 day exits.
-    "num_tp3_exit",      # Count of tp3 day exits.
+    "num_sl_exit",       # Count of stop-loss day exits.
+    "num_tp_exit",       # Count of take-profit day exits.
     "num_time_exit",     # Count of time day exits.
 
     # Exit rates
@@ -1454,16 +1450,10 @@ class TradingRunOutput:
         wins = pnl[pnl > 0]
         losses = pnl[pnl < 0]
         exit_reasons = summary_frame["exit_rsn"].fillna("").astype(str)
-        num_sl1_exit = int((exit_reasons == "sl1").sum())
-        num_sl2_exit = int((exit_reasons == "sl2").sum())
-        num_sl3_exit = int((exit_reasons == "sl3").sum())
-        num_tp1_exit = int((exit_reasons == "tp1").sum())
-        num_tp2_exit = int((exit_reasons == "tp2").sum())
-        num_tp3_exit = int((exit_reasons == "tp3").sum())
+        num_sl_exit = int((exit_reasons == "sl").sum())
+        num_tp_exit = int((exit_reasons == "tp").sum())
         num_time_exit = int((exit_reasons == "time").sum())
 
-        num_sl_exit = num_sl1_exit + num_sl2_exit + num_sl3_exit
-        num_tp_exit = num_tp1_exit + num_tp2_exit + num_tp3_exit
         total_exits = num_sl_exit + num_tp_exit + num_time_exit
 
         gross_wins = float(wins.sum()) if not wins.empty else 0.0
@@ -1491,12 +1481,8 @@ class TradingRunOutput:
             "win_rate": self._safe_ratio(win_days, num_days),
             "profit_factor": self._safe_ratio(gross_wins, gross_losses),
             "payoff_ratio": self._safe_ratio(self._series_mean(wins), abs(self._series_mean(losses) or 0.0)),
-            "num_sl1_exit": num_sl1_exit,
-            "num_sl2_exit": num_sl2_exit,
-            "num_sl3_exit": num_sl3_exit,
-            "num_tp1_exit": num_tp1_exit,
-            "num_tp2_exit": num_tp2_exit,
-            "num_tp3_exit": num_tp3_exit,
+            "num_sl_exit": num_sl_exit,
+            "num_tp_exit": num_tp_exit,
             "num_time_exit": num_time_exit,
             "pct_exit_sl": self._safe_ratio(num_sl_exit, total_exits),
             "pct_exit_tp": self._safe_ratio(num_tp_exit, total_exits),
