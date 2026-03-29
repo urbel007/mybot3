@@ -466,13 +466,23 @@ class ProcessedBroker(MyBot3BrokerProtocol):
             filtered.append({"label": leg.label, **quote})
         return filtered
 
+    _TRUSTED_QUOTE_QUALITIES = frozenset({"live", "stale_ffill", "stale-ffill", "staleffill"})
+
+    @classmethod
+    def _is_trusted_quote(cls, quote: dict[str, object]) -> bool:
+        quality = str(quote.get("quality") or "missing").strip().lower()
+        return quality in cls._TRUSTED_QUOTE_QUALITIES
+
     def _build_structure_quotes(self, option_quotes: list[dict[str, object]]) -> dict[str, float | None]:
         structure_quotes: dict[str, float | None] = {}
         for quote in option_quotes:
             label = quote.get("label")
             if not isinstance(label, str):
                 continue
-            price = preferred_option_price(quote)
+            if self._is_trusted_quote(quote):
+                price = preferred_option_price(quote)
+            else:
+                price = None
             structure_quotes[label] = price
         return structure_quotes
 
@@ -482,12 +492,20 @@ class ProcessedBroker(MyBot3BrokerProtocol):
             label = quote.get("label")
             if not isinstance(label, str):
                 continue
-            structure_quote_details[label] = StructureQuote(
-                label=label,
-                bid=coerce_number(quote.get("bid")),
-                ask=coerce_number(quote.get("ask")),
-                mid=coerce_number(quote.get("mid")),
-            )
+            if self._is_trusted_quote(quote):
+                structure_quote_details[label] = StructureQuote(
+                    label=label,
+                    bid=coerce_number(quote.get("bid")),
+                    ask=coerce_number(quote.get("ask")),
+                    mid=coerce_number(quote.get("mid")),
+                )
+            else:
+                structure_quote_details[label] = StructureQuote(
+                    label=label,
+                    bid=None,
+                    ask=None,
+                    mid=None,
+                )
         return structure_quote_details
 
     def _register_order(
